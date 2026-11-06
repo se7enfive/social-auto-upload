@@ -108,6 +108,11 @@ def _state_root() -> Path:
     return Path(BASE_DIR) / ".local"
 
 
+def state_root() -> Path:
+    """供同层模块（如发布节奏配置）读取本地状态根目录。"""
+    return _state_root()
+
+
 def account_journal_dir(platform: str, account_name: str) -> Path:
     return _state_root() / "publications" / platform / _safe_component(account_name)
 
@@ -446,6 +451,7 @@ class PublicationAttempt:
         self.updated_at = self.created_at
         self.status = STATUS_PREPARING
         self.submit_attempted = False
+        self.submit_attempted_at: str | None = None
         self.reason = ""
         self.summary = summary or {}
         self.evidence: dict = {}
@@ -462,6 +468,7 @@ class PublicationAttempt:
             "content_fingerprint": self.fingerprint,
             "status": self.status,
             "submit_attempted": self.submit_attempted,
+            "submit_attempted_at": self.submit_attempted_at,
             "prepare_only": self.prepare_only,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -543,13 +550,16 @@ class PublicationAttempt:
             self.evidence.update(evidence)
         previous_status = self.status
         previous_attempted = self.submit_attempted
+        previous_attempted_at = self.submit_attempted_at
         self.status = STATUS_SUBMISSION_UNKNOWN
         self.submit_attempted = True
+        self.submit_attempted_at = _now()
         try:
             self._write()
         except Exception:
             self.status = previous_status
             self.submit_attempted = previous_attempted
+            self.submit_attempted_at = previous_attempted_at
             raise
 
     def mark_submitted(self, evidence: dict | None = None) -> None:
@@ -661,10 +671,12 @@ async def submit_once(
             except Exception:
                 risk_reason = None
         reason = f"提交结果未确认: {exc}"
+        risk_evidence = None
         if risk_reason:
             reason = f"{reason}; 风险信号: {risk_reason}"
+            risk_evidence = {"risk_signal": risk_reason}
         if safety is not None:
-            safety.mark_unknown(reason)
+            safety.mark_unknown(reason, risk_evidence)
         raise PublishOutcomeUnknown(
             f"最终发表已尝试但结果未确认，可能已经提交。{reason}。"
             "请先到平台核对作品，不要直接重发。"

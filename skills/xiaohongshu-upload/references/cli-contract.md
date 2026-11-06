@@ -141,3 +141,5 @@ sau safety resolve --platform xiaohongshu --account <account> \
 ```
 
 存在未解决的 `submission_unknown` / `needs_human` 时，后续自动发布会失败；换 `--request-id` 不能绕过。`safety status` 只读本地记录，不访问平台；`safety resolve` 不会登录或重发。本机制不保证 exactly-once，也不承诺不触发平台风控。
+
+发布节奏（可选）：`.local/publish_pacing.json` 可配置 `min_interval_seconds`、`max_submits_per_24h`、`cooldown_after_risk_seconds`，默认不限制。被限制时命令在启动浏览器前失败，不创建记录、不点击发表；`--prepare-only` 不受影响。`sau safety status` 的 `pacing` 字段给出 `allowed_now`、`next_allowed_at` 和原因。不要通过修改配置、换 `--request-id` 或调整系统时间绕过用户设置的节奏。

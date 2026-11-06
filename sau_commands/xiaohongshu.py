@@ -31,6 +31,7 @@ from utils.publish_safety import (
     file_signature,
     session_lock,
 )
+from utils.publish_pacing import enforce_publish_pacing
 
 
 def register(platform_parsers):
@@ -169,6 +170,7 @@ async def upload_xiaohongshu_video(request: XiaohongshuVideoUploadRequest) -> Pa
             },
         )
         attempt.ensure_can_start()
+        enforce_publish_pacing(attempt)
         attempt.begin()
         try:
             is_ready = await xiaohongshu_setup(str(account_file), handle=False)
@@ -220,6 +222,7 @@ async def upload_xiaohongshu_note(request: XiaohongshuNoteUploadRequest) -> Path
             },
         )
         attempt.ensure_can_start()
+        enforce_publish_pacing(attempt)
         attempt.begin()
         try:
             is_ready = await xiaohongshu_setup(str(account_file), handle=False)

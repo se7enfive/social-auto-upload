@@ -206,9 +206,29 @@ sau safety resolve \
 
 存在未解决的 `submission_unknown` / `needs_human` 时，该账号的后续自动发布会被阻止；换一个 `--request-id` 不能绕过。`safety status` 不是平台核验；`safety resolve` 也不会登录、刷新、重传或发表。
 
+### 发布节奏（可选）
+
+在 `.local/publish_pacing.json`（或 `$SAU_STATE_DIR/publish_pacing.json`）中可配置同一账号的最小发布间隔、滚动 24 小时提交上限和风险后冷却：
+
+```json
+{
+  "douyin": {
+    "min_interval_seconds": 3600,
+    "max_submits_per_24h": 3,
+    "cooldown_after_risk_seconds": 86400
+  }
+}
+```
+
+不创建该文件即不限制，行为与旧命令一致。只统计真正进入最终点击边界的记录；`--prepare-only` 不受限制。配置无效、记录损坏或缺少时间时会拒绝自动发表，避免静默放宽限制。被拦截时命令在启动浏览器前失败，不创建新记录、不点击发表。`sau safety status` 的 `pacing` 字段显示当前规则、是否允许发布和最早可再次发布的时间。
+
+该模块不模拟人类操作，不提供随机延迟、指纹混淆、模拟滚动或养号等反检测能力。完整规则和上游同步方式见 [发布节奏与账号冷却](./publish-pacing.md)。
+
 ### 已知边界
 
 本机制降低误发、重复提交和无限等待的风险，但不保证 exactly-once，也不承诺不触发平台风控。它不包含验证码绕过、指纹伪造或规避封禁的能力；遇到验证或账号限制时应人工处理并遵守平台规则。
+
+保护层和节奏限制只覆盖 `sau` CLI 的四条发布路径。Web 控制台路径（`sau_backend.py` → `myUtils/postVideo.py`）直接构造上传器，目前不受保护，详见 [发布安全与可靠性机制](./publish-safety.md#已知边界与未覆盖路径)。
 
 完整状态机、机制来源和许可边界见 [发布安全与可靠性机制](./publish-safety.md)。
 

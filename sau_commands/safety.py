@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 from sau_commands.arguments import resolve_account_file
+from utils.publish_pacing import pacing_snapshot
 from utils.publish_safety import (
     corrupt_record_paths,
     find_unresolved,
@@ -78,6 +79,7 @@ async def run(args):
             "unresolved": [_public_record(record) for record in unresolved],
             "recent": [_public_record(record) for record in records[:5]],
             "corrupt_files": corrupt_record_paths(args.target_platform, args.account),
+            "pacing": pacing_snapshot(args.target_platform, args.account),
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0

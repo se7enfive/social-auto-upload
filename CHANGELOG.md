@@ -34,6 +34,10 @@
 - 四条路径统一有界清理浏览器资源；context 关闭失败仍会关闭 browser。
 - 抖音／小红书 Skill 改为两阶段确认：先 `--prepare-only` 展示内容与副作用，等待用户新的明确确认后再正式提交；prepare／submit 使用可关联但不同的 request-id。
 - 新增 `tests/test_publish_safety.py`（43 项）及 CLI 包装层测试；验证仅使用 mock 页面和临时状态目录，真实平台发布仍待单独授权验收。
+- 新增可选发布节奏 `utils/publish_pacing.py`：按账号限制最小发布间隔、滚动 24 小时提交上限和验证／风险后冷却；默认关闭，`--prepare-only` 豁免，配置无效或记录损坏时拒绝自动发表。
+- `sau safety status` 返回值增加 `pacing` 快照（规则、`allowed_now`、`next_allowed_at`、原因）；节奏在启动浏览器和创建新记录之前检查。
+- 新增 `tests/test_publish_pacing.py`（25 项）和 [docs/publish-pacing.md](./docs/publish-pacing.md)，说明配置、判定规则、已知边界及上游同步方式。
+- 明确当前保护层和节奏限制只覆盖 `sau` CLI 路径，Web 控制台路径（`sau_backend.py` → `myUtils/postVideo.py`）尚未接入。
 - 机制说明、恢复流程和许可边界见 [docs/publish-safety.md](./docs/publish-safety.md)。
 
 ## 发布流程

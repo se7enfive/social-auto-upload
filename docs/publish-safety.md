@@ -108,6 +108,10 @@ Agent 工作流中，准备与正式提交应使用不同但可关联的 `--requ
 
 `close_browser_resources()` 分别有界关闭 context 和 browser。context 关闭失败仍会尝试关闭 browser；清理错误只记录日志，不覆盖原始失败或已确认的提交状态。
 
+### 10. 发布节奏（可选）
+
+独立的 `utils/publish_pacing.py` 提供可选的发布间隔、滚动 24 小时提交上限和风险后冷却，默认关闭。它复用本 journal 的 `submit_attempted_at`，判定发生在 `ensure_can_start()` 之后、创建新记录和启动浏览器之前；`--prepare-only` 不受限制。该模块只做确定性运营限制，不做拟人化、随机化或反检测。配置、规则和上游同步方式见 [发布节奏与账号冷却](./publish-pacing.md)。
+
 ## 状态机
 
 ```text
@@ -153,6 +157,13 @@ sau safety resolve \
 
 截图只在 `--debug` 且结果未知时尽力保存到 journal 目录的 `screenshots/` 下；截图失败被忽略。
 
+## 已知边界与未覆盖路径
+
+- 本保护层和发布节奏只覆盖 `sau` CLI 的四条路径。Web 控制台路径 `sau_backend.py`（Flask）→ `myUtils/postVideo.py`（`post_video_DouYin` / `post_video_xhs`）直接构造 `DouYinVideo` / `XiaoHongShuVideo`，绕过 `sau_commands` 包装，因此会话锁、journal、单次提交、风险停手和节奏限制都不生效。如需覆盖，应把 Web 路径迁移到 `sau_commands` 的上传函数，而不是复制保护逻辑。
+- 仓库内其他历史直连脚本（例如直接实例化上传器的示例）也不在这把锁的保护范围内。
+- 锁按本地账号文件路径隔离，不识别指向同一远端账号的不同别名；不做远端身份去重。
+- 状态判定依赖平台页面已有的可证明信号，平台改版可能导致状态退化为 `submission_unknown`；此时按人工核对流程处理。
+
 ## 测试与验证
 
 新增 `tests/test_publish_safety.py` 覆盖：
@@ -164,5 +175,7 @@ sau safety resolve \
 - 提交超时后截图失败仍保持 `submission_unknown`。
 - `sau safety status/resolve` 通过 CLI 分发执行。
 - CLI 包装层：阻塞账号不启动浏览器、失败时导出结果、同 request-id 已提交时退出码 0。
+
+`tests/test_publish_pacing.py` 另行覆盖发布节奏的配置校验、窗口边界、prepare-only 豁免、启动浏览器前阻断和 `sau safety status` 快照。
 
 验证只使用 mock 页面和本地临时状态目录，不使用真实账号登录、上传或发表。真实平台验收仍需单独授权和人工核对。

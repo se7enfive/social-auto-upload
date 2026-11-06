@@ -31,6 +31,7 @@ from utils.publish_safety import (
     file_signature,
     session_lock,
 )
+from utils.publish_pacing import enforce_publish_pacing
 
 
 def register(platform_parsers):
@@ -200,6 +201,7 @@ async def upload_video(request: DouyinVideoUploadRequest) -> Path:
             },
         )
         attempt.ensure_can_start()
+        enforce_publish_pacing(attempt)
         attempt.begin()
         try:
             is_ready = await douyin_setup(str(account_file), handle=False)
@@ -260,6 +262,7 @@ async def upload_note(request: DouyinNoteUploadRequest) -> Path:
             },
         )
         attempt.ensure_can_start()
+        enforce_publish_pacing(attempt)
         attempt.begin()
         try:
             is_ready = await douyin_setup(str(account_file), handle=False)
