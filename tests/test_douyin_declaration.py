@@ -66,12 +66,15 @@ class DouyinDeclarationTests(unittest.TestCase):
         video.apply_self_declaration = AsyncMock(side_effect=RuntimeError("抖音自主声明设置失败"))
 
         locator = MagicMock()
+        locator.first = locator
         locator.set_input_files = AsyncMock()
+        locator.wait_for = AsyncMock()
         locator.count = AsyncMock(return_value=1)
         page = MagicMock()
         page.goto = AsyncMock()
         page.wait_for_url = AsyncMock()
         page.wait_for_selector = AsyncMock()
+        page.wait_for_timeout = AsyncMock()
         page.locator.return_value = locator
 
         context = MagicMock()

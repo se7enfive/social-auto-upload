@@ -17,6 +17,7 @@
 - `dayu`
 - `xueqiu`：HTML/Markdown/TXT 长文、原位置配图及封面，默认实际发表，支持按原作品 ID 查询结果；见 [雪球使用说明](./xueqiu.md)，已实测正式 CLI 发表及后台核验
 - `zhihu`：文章、视频和定时发布；见仓库内 [知乎 Skill](../skills/zhihu-upload/SKILL.md)
+- `safety`：仅操作本地发布记录的恢复工具，不读取 cookie、不访问平台；见下文“发布安全与恢复”
 
 文章本地处理命令为 `sau article`，支持主题列表、环境准备和 Markdown/HTML 文件渲染，见 [文章文件与主题渲染](./article.md)。
 
@@ -54,6 +55,7 @@ sau facebook-page --help
 sau dayu --help
 sau xueqiu --help
 sau zhihu --help
+sau safety --help
 ```
 
 ## 安装 patchright 浏览器
@@ -117,10 +119,10 @@ sau douyin upload-note --account <account_name> --images videos/1.png videos/2.p
 
 抖音短信验证码补充说明：
 
-- 视频发布过程中如果触发短信二次验证，CLI 会优先读取项目根目录下的 `verify_code.txt`
-- 如果未找到 `verify_code.txt`，并且当前命令是在交互式终端中手动运行，CLI 会直接在终端提示输入验证码
-- 对 agent、自动任务、远程桥接这类场景，仍然可以继续用写入 `verify_code.txt` 的方式喂验证码
-- 验证通过后，程序会自动清理 `verify_code.txt`
+- 程序优先读取账号作用域的验证码文件，等待日志会给出本次具体路径；为兼容旧流程，仍支持项目根目录下的 `verify_code.txt`
+- 每次发布最多自动触发一次「获取验证码」请求；等待超过 10 分钟或总预算耗尽时记录为 `needs_human`，不会继续自动提交
+- 验证码不会以明文写入日志；验证通过后会删除对应的验证码文件
+- 需要人工查看页面时加 `--headed`；Agent 场景不应把验证码或 cookie 写入聊天记录
 
 ## 快手 CLI 子命令
 
@@ -145,6 +147,70 @@ sau xiaohongshu upload-note --account <account_name> --images videos/1.png video
 ```bash
 SAU_XHS_CREATOR_BASE_URL=https://creator.rednote.com sau xiaohongshu login --account <account_name>
 ```
+
+## 发布安全与恢复（抖音 / 小红书）
+
+抖音和小红书的四条发布路径（视频／图文）支持同一组可选保护参数：
+
+```bash
+sau douyin upload-video \
+  --account <account_name> \
+  --file videos/demo.mp4 \
+  --title "示例标题" \
+  [--prepare-only] \
+  [--result .local/result.json] \
+  [--request-id order-20261106-001] \
+  [--timeout 1800]
+```
+
+| 参数 | 作用 |
+| --- | --- |
+| `--prepare-only` | 完成素材上传、表单填写和排期设置后停在发布页，不点击最终发表；平台仍可能保存素材或草稿 |
+| `--result PATH` | 将本次发布记录导出为 JSON；成功、失败或结果未知时都会尽力写出 |
+| `--request-id TEXT` | 可选的稳定业务请求键；相同键且内容相同、已提交过时直接跳过（退出码 0），内容不同则拒绝 |
+| `--timeout SECONDS` | 总执行预算，默认 1800 秒；提交后的结果观察最多 120 秒且不超过剩余预算 |
+
+旧命令的默认语义不变：不传 `--prepare-only` 时仍会上传并尝试发表。建议 Agent 先执行 `--prepare-only`，向用户报告账号、内容、素材和排期，取得明确确认后再执行普通发布命令。准备与正式提交建议使用不同但可关联的 `--request-id`，正式提交的 ID 在重试间保持稳定；用户最初的发布请求不能替代准备后的再次确认。
+
+### 本地状态与互斥
+
+- 每次发布在 `.local/publications/<platform>/<account>/runs/` 下记录 run-id、内容指纹、状态和证据；不保存 cookie、验证码或 storage_state。
+- 同一账号文件同时只允许一个进程操作；冲突会立即失败，不排队抢占。不同账号可以并行。
+- 该锁只覆盖本 CLI 的同一本地会话文件，不保证跨别名识别同一远端账号，也不覆盖仓库内的历史直连脚本。
+- 可用 `SAU_STATE_DIR` 环境变量改写 `.local` 状态根目录（测试或自定义部署用）。
+
+### 状态与恢复
+
+| 状态 | 含义 | 建议动作 |
+| --- | --- | --- |
+| `preparing` | 已开始，尚未进入提交 | 可重试 |
+| `prepared` | `--prepare-only` 已完成 | 确认后可正式发布 |
+| `failed_before_submit` | 点击前失败，未提交 | 修复原因后重试 |
+| `submission_unknown` | 已尝试点击，结果无法确认 | **先到平台核对原作品，不要重发** |
+| `needs_human` | 点击前遇到明确验证或风险信号 | 人工完成验证后处理 |
+| `submitted` | 页面出现成功结果 | 无需重试 |
+| `not_submitted` | 人工核对确认未发布 | 可重试 |
+
+```bash
+# 只读本地记录：不读取 cookie，也不访问平台
+sau safety status --platform douyin --account <account_name>
+
+# 人工核对后保存结论；必须先到平台确认原作品
+sau safety resolve \
+  --platform douyin \
+  --account <account_name> \
+  --run-id <ID> \
+  --outcome not-submitted \
+  --reason "创作中心未找到该作品"
+```
+
+存在未解决的 `submission_unknown` / `needs_human` 时，该账号的后续自动发布会被阻止；换一个 `--request-id` 不能绕过。`safety status` 不是平台核验；`safety resolve` 也不会登录、刷新、重传或发表。
+
+### 已知边界
+
+本机制降低误发、重复提交和无限等待的风险，但不保证 exactly-once，也不承诺不触发平台风控。它不包含验证码绕过、指纹伪造或规避封禁的能力；遇到验证或账号限制时应人工处理并遵守平台规则。
+
+完整状态机、机制来源和许可边界见 [发布安全与可靠性机制](./publish-safety.md)。
 
 ## Bilibili CLI 子命令
 

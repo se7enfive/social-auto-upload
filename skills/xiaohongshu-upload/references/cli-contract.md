@@ -42,6 +42,10 @@ sau xiaohongshu upload-video \
   [--tags tag1,tag2] \
   [--schedule "YYYY-MM-DD HH:MM"] \
   [--thumbnail <image-path>] \
+  [--prepare-only] \
+  [--result <json-path>] \
+  [--request-id <stable-id>] \
+  [--timeout <seconds>] \
   [--debug] \
   [--headless | --headed]
 ```
@@ -55,6 +59,10 @@ sau xiaohongshu upload-video \
   - `--tags`
   - `--schedule`
   - `--thumbnail`
+  - `--prepare-only`
+  - `--result`
+  - `--request-id`
+  - `--timeout`
   - `--debug`
   - `--headless`
   - `--headed`
@@ -69,6 +77,10 @@ sau xiaohongshu upload-note \
   [--note "<content>"] \
   [--tags tag1,tag2] \
   [--schedule "YYYY-MM-DD HH:MM"] \
+  [--prepare-only] \
+  [--result <json-path>] \
+  [--request-id <stable-id>] \
+  [--timeout <seconds>] \
   [--debug] \
   [--headless | --headed]
 ```
@@ -81,6 +93,10 @@ sau xiaohongshu upload-note \
   - `--note`
   - `--tags`
   - `--schedule`
+  - `--prepare-only`
+  - `--result`
+  - `--request-id`
+  - `--timeout`
   - `--debug`
   - `--headless`
   - `--headed`
@@ -101,3 +117,27 @@ YYYY-MM-DD HH:MM
 - `upload-note` 每次命令支持多张图片
 - 视频描述字段统一使用 `--desc`
 - 图文正文统一使用 `--note`
+
+## 发布安全与恢复
+
+- `--prepare-only`：完成素材上传和表单填写后停在发布页，不点击最终发表；素材仍会上传，平台可能保存草稿。
+- `--result PATH`：导出本次发布记录 JSON，成功、失败或结果未知时都会尽力写出。
+- `--request-id TEXT`：稳定业务请求键；相同键且内容相同、已提交过时跳过（退出码 0），内容不同则拒绝。
+- `--timeout SECONDS`：总执行预算，默认 1800 秒。
+
+状态含义：
+
+- `prepared`：预演完成，未提交
+- `failed_before_submit`：点击前失败，可重试
+- `submission_unknown`：已尝试提交但结果不明，**先核对原作品，不要重发**
+- `needs_human`：点击前遇到验证或风险信号，需人工处理
+- `submitted`：已确认提交成功
+- `not_submitted`：人工核对确认未发布
+
+```bash
+sau safety status --platform xiaohongshu --account <account>
+sau safety resolve --platform xiaohongshu --account <account> \
+  --run-id <ID> --outcome not-submitted --reason "创作中心未找到该作品"
+```
+
+存在未解决的 `submission_unknown` / `needs_human` 时，后续自动发布会失败；换 `--request-id` 不能绕过。`safety status` 只读本地记录，不访问平台；`safety resolve` 不会登录或重发。本机制不保证 exactly-once，也不承诺不触发平台风控。

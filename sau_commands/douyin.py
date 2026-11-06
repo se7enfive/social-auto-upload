@@ -14,12 +14,22 @@ from uploader.douyin_uploader.main import (
 )
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_publish_safety_flags,
     add_runtime_flags,
     existing_file_path,
     parse_image_files,
     parse_tags,
+    publish_safety_options,
     resolve_account_file,
     schedule_value,
+)
+from utils.publish_safety import (
+    DEFAULT_PUBLISH_TIMEOUT,
+    PublicationAttempt,
+    PublishAlreadySubmitted,
+    content_fingerprint,
+    file_signature,
+    session_lock,
 )
 
 
@@ -52,6 +62,7 @@ def register(platform_parsers):
         help="Exact Douyin self-declaration option text; omitted means do not set one",
     )
     upload_video_parser.add_argument("--collection", default=None, help="Optional collection name to add the work into (must already exist)")
+    add_publish_safety_flags(upload_video_parser)
     add_runtime_flags(upload_video_parser)
 
     upload_note_parser = douyin_actions.add_parser("upload-note", help="Upload one note to Douyin")
@@ -63,6 +74,7 @@ def register(platform_parsers):
     upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     upload_note_parser.add_argument("--bgm", default="", help="BGM music name to search and select")
     upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    add_publish_safety_flags(upload_note_parser)
     add_runtime_flags(upload_note_parser)
 
 
@@ -84,6 +96,10 @@ class DouyinVideoUploadRequest:
     headless: bool = True
     declaration: str | None = None
     collection_name: str | None = None
+    prepare_only: bool = False
+    result_file: Path | None = None
+    request_id: str | None = None
+    timeout: float = DEFAULT_PUBLISH_TIMEOUT
 
 
 @dataclass(slots=True)
@@ -98,74 +114,179 @@ class DouyinNoteUploadRequest:
     debug: bool = True
     headless: bool = True
     bgm: str = ""
+    prepare_only: bool = False
+    result_file: Path | None = None
+    request_id: str | None = None
+    timeout: float = DEFAULT_PUBLISH_TIMEOUT
 
 
 async def login_douyin_account(account_name: str, headless: bool = True) -> dict:
     account_file = resolve_account_file("douyin", account_name)
-    return await douyin_setup(str(account_file), handle=True, return_detail=True, headless=headless)
+    with session_lock(account_file, "douyin", account_name):
+        return await douyin_setup(str(account_file), handle=True, return_detail=True, headless=headless)
 
 
 async def check_douyin_account(account_name: str) -> bool:
     account_file = resolve_account_file("douyin", account_name)
-    if not account_file.exists():
-        return False
-    return await douyin_cookie_auth(str(account_file))
+    with session_lock(account_file, "douyin", account_name):
+        if not account_file.exists():
+            return False
+        return await douyin_cookie_auth(str(account_file))
+
+
+def _schedule_fingerprint(publish_date: datetime | int) -> str | int:
+    return publish_date.isoformat() if isinstance(publish_date, datetime) else 0
+
+
+def _video_fingerprint(request: DouyinVideoUploadRequest) -> str:
+    return content_fingerprint(
+        {
+            "platform": "douyin",
+            "kind": "video",
+            "title": request.title,
+            "description": request.description,
+            "tags": request.tags,
+            "publish_date": _schedule_fingerprint(request.publish_date),
+            "media": [file_signature(request.video_file)],
+            "thumbnails": [
+                file_signature(path)
+                for path in (
+                    request.thumbnail_file,
+                    request.thumbnail_landscape_file,
+                    request.thumbnail_portrait_file,
+                )
+                if path
+            ],
+            "product_link": request.product_link,
+            "product_title": request.product_title,
+            "declaration": request.declaration,
+            "collection": request.collection_name,
+        }
+    )
+
+
+def _note_fingerprint(request: DouyinNoteUploadRequest) -> str:
+    return content_fingerprint(
+        {
+            "platform": "douyin",
+            "kind": "note",
+            "title": request.title,
+            "note": request.note,
+            "tags": request.tags,
+            "publish_date": _schedule_fingerprint(request.publish_date),
+            "media": [file_signature(path) for path in request.image_files],
+            "bgm": request.bgm,
+        }
+    )
 
 
 async def upload_video(request: DouyinVideoUploadRequest) -> Path:
     account_file = resolve_account_file("douyin", request.account_name)
-    is_ready = await douyin_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"Douyin cookie is missing or expired: {account_file}. Run `sau douyin login --account {request.account_name}` first."
+    fingerprint = _video_fingerprint(request)
+    with session_lock(account_file, "douyin", request.account_name):
+        attempt = PublicationAttempt(
+            platform="douyin",
+            account_name=request.account_name,
+            account_file=account_file,
+            fingerprint=fingerprint,
+            request_id=request.request_id,
+            prepare_only=request.prepare_only,
+            timeout=request.timeout,
+            summary={
+                "kind": "video",
+                "title": request.title,
+                "media_count": 1,
+                "scheduled": isinstance(request.publish_date, datetime),
+            },
         )
+        attempt.ensure_can_start()
+        attempt.begin()
+        try:
+            is_ready = await douyin_setup(str(account_file), handle=False)
+            if not is_ready:
+                raise RuntimeError(
+                    f"Douyin cookie is missing or expired: {account_file}. Run `sau douyin login --account {request.account_name}` first."
+                )
 
-    app = DouYinVideo(
-        request.title,
-        str(request.video_file),
-        request.tags,
-        request.publish_date,
-        str(account_file),
-        desc=request.description,
-        thumbnail_landscape_path=(
-            str(request.thumbnail_landscape_file) if request.thumbnail_landscape_file else None
-        ),
-        thumbnail_portrait_path=str(
-            request.thumbnail_portrait_file or request.thumbnail_file
-        ) if request.thumbnail_portrait_file or request.thumbnail_file else None,
-        productLink=request.product_link,
-        productTitle=request.product_title,
-        declaration=request.declaration,
-        publish_strategy=request.publish_strategy,
-        debug=request.debug,
-        headless=request.headless,
-        collection_name=request.collection_name,
-    )
-    await app.douyin_upload_video()
+            app = DouYinVideo(
+                request.title,
+                str(request.video_file),
+                request.tags,
+                request.publish_date,
+                str(account_file),
+                desc=request.description,
+                thumbnail_landscape_path=(
+                    str(request.thumbnail_landscape_file) if request.thumbnail_landscape_file else None
+                ),
+                thumbnail_portrait_path=str(
+                    request.thumbnail_portrait_file or request.thumbnail_file
+                ) if request.thumbnail_portrait_file or request.thumbnail_file else None,
+                productLink=request.product_link,
+                productTitle=request.product_title,
+                declaration=request.declaration,
+                publish_strategy=request.publish_strategy,
+                debug=request.debug,
+                headless=request.headless,
+                collection_name=request.collection_name,
+                safety=attempt,
+            )
+            await attempt.run_with_deadline(app.douyin_upload_video())
+        except Exception as exc:
+            attempt.finalize_on_error(str(exc))
+            raise
+        finally:
+            # 失败时也导出最终记录，便于调用方读取真实状态；导出失败不影响原始结果。
+            attempt.export(request.result_file)
     return account_file
 
 
 async def upload_note(request: DouyinNoteUploadRequest) -> Path:
     account_file = resolve_account_file("douyin", request.account_name)
-    is_ready = await douyin_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"Douyin cookie is missing or expired: {account_file}. Run `sau douyin login --account {request.account_name}` first."
+    fingerprint = _note_fingerprint(request)
+    with session_lock(account_file, "douyin", request.account_name):
+        attempt = PublicationAttempt(
+            platform="douyin",
+            account_name=request.account_name,
+            account_file=account_file,
+            fingerprint=fingerprint,
+            request_id=request.request_id,
+            prepare_only=request.prepare_only,
+            timeout=request.timeout,
+            summary={
+                "kind": "note",
+                "title": request.title,
+                "media_count": len(request.image_files),
+                "scheduled": isinstance(request.publish_date, datetime),
+            },
         )
+        attempt.ensure_can_start()
+        attempt.begin()
+        try:
+            is_ready = await douyin_setup(str(account_file), handle=False)
+            if not is_ready:
+                raise RuntimeError(
+                    f"Douyin cookie is missing or expired: {account_file}. Run `sau douyin login --account {request.account_name}` first."
+                )
 
-    app = DouYinNote(
-        image_paths=[str(path) for path in request.image_files],
-        title=request.title,
-        note=request.note,
-        tags=request.tags,
-        publish_date=request.publish_date,
-        account_file=str(account_file),
-        publish_strategy=request.publish_strategy,
-        debug=request.debug,
-        headless=request.headless,
-        bgm=request.bgm,
-    )
-    await app.douyin_upload_note()
+            app = DouYinNote(
+                image_paths=[str(path) for path in request.image_files],
+                title=request.title,
+                note=request.note,
+                tags=request.tags,
+                publish_date=request.publish_date,
+                account_file=str(account_file),
+                publish_strategy=request.publish_strategy,
+                debug=request.debug,
+                headless=request.headless,
+                bgm=request.bgm,
+                safety=attempt,
+            )
+            await attempt.run_with_deadline(app.douyin_upload_note())
+        except Exception as exc:
+            attempt.finalize_on_error(str(exc))
+            raise
+        finally:
+            attempt.export(request.result_file)
     return account_file
 
 
@@ -186,6 +307,7 @@ async def run(args):
     publish_strategy = DOUYIN_PUBLISH_STRATEGY_SCHEDULED if args.schedule else DOUYIN_PUBLISH_STRATEGY_IMMEDIATE
 
     if args.action == "upload-video":
+        safety_options = publish_safety_options(args)
         request = DouyinVideoUploadRequest(
             account_name=args.account,
             video_file=args.file,
@@ -203,12 +325,24 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
             collection_name=args.collection,
+            prepare_only=safety_options["prepare_only"],
+            result_file=safety_options["result_file"],
+            request_id=safety_options["request_id"],
+            timeout=safety_options["timeout"],
         )
-        await upload_video(request)
-        print(f"Douyin video upload submitted: {request.video_file}")
+        try:
+            await upload_video(request)
+        except PublishAlreadySubmitted as exc:
+            print(f"Douyin video already submitted (request-id={request.request_id}), skipped: {exc}")
+            return 0
+        if request.prepare_only:
+            print(f"Douyin video prepared (not published): {request.video_file}")
+        else:
+            print(f"Douyin video upload submitted: {request.video_file}")
         return 0
 
     if args.action == "upload-note":
+        safety_options = publish_safety_options(args)
         # 如果指定了 --notef，读取文件内容作为 note
         note_content = args.note
         if args.notef:
@@ -229,9 +363,20 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
             bgm=args.bgm or "",
+            prepare_only=safety_options["prepare_only"],
+            result_file=safety_options["result_file"],
+            request_id=safety_options["request_id"],
+            timeout=safety_options["timeout"],
         )
-        await upload_note(request)
-        print(f"Douyin note upload submitted: {len(request.image_files)} images")
+        try:
+            await upload_note(request)
+        except PublishAlreadySubmitted as exc:
+            print(f"Douyin note already submitted (request-id={request.request_id}), skipped: {exc}")
+            return 0
+        if request.prepare_only:
+            print(f"Douyin note prepared (not published): {len(request.image_files)} images")
+        else:
+            print(f"Douyin note upload submitted: {len(request.image_files)} images")
         return 0
 
     raise RuntimeError(f"Unsupported Douyin action: {args.action}")

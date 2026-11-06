@@ -24,6 +24,18 @@
 - 修正发布成功判断，读取成功弹层打开的 `/pin/<作品ID>` 详情链接；链接读取失败时保留已发表状态。
 - 作品查询兼容新版视频链接；定时发布标为实验性功能。
 
+### 发布安全（抖音 / 小红书）
+
+- 新增共享保护层 `utils/publish_safety.py`：账号级跨进程会话锁、原子 JSON journal、有界 deadline、内容指纹和单次提交控制。
+- 抖音和小红书的视频／图文上传新增 `--prepare-only`、`--result`、`--request-id`、`--timeout`；旧命令默认仍会尝试发表。
+- 最终发表点击前先持久化提交意图，点击最多一次；点击后结果不明保持 `submission_unknown`，不会自动重发。
+- 存在未解决的 `submission_unknown` / `needs_human` 时阻止该账号继续自动发表；新增本地命令 `sau safety status` 和 `sau safety resolve`，不读取 cookie、不访问平台。
+- 抖音短信验证码改为账号作用域文件优先、最多自动请求一次、日志不打印明文；等待超过 10 分钟转人工处理。
+- 四条路径统一有界清理浏览器资源；context 关闭失败仍会关闭 browser。
+- 抖音／小红书 Skill 改为两阶段确认：先 `--prepare-only` 展示内容与副作用，等待用户新的明确确认后再正式提交；prepare／submit 使用可关联但不同的 request-id。
+- 新增 `tests/test_publish_safety.py`（43 项）及 CLI 包装层测试；验证仅使用 mock 页面和临时状态目录，真实平台发布仍待单独授权验收。
+- 机制说明、恢复流程和许可边界见 [docs/publish-safety.md](./docs/publish-safety.md)。
+
 ## 发布流程
 
 1. 在 `Unreleased` 中记录用户可感知的变更和验证结果。

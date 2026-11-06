@@ -34,8 +34,12 @@ summary: 使用 sau 登录抖音并发布视频或图文。
 
 1. 先确认 `references/runtime-requirements.md` 里的运行前提。
 2. 再确认 `references/cli-contract.md` 里的命令契约。
-3. 执行匹配的 `sau douyin ...` 命令。
-4. 如果命令失败，再看 `references/troubleshooting.md`。
+3. 默认先加 `--prepare-only` 执行匹配的 `sau douyin ...` 命令，完成素材上传和表单填写但不点最终发表。
+4. 向用户报告账号、标题、正文、标签、封面、排期和 `--prepare-only` 可能留下的素材／草稿，取得明确确认。
+5. 确认后执行不带 `--prepare-only` 的同一命令完成发布；准备与正式提交使用不同但可关联的 `--request-id`（例如 `<业务ID>-prepare` / `<业务ID>-submit`），正式提交的 ID 在重试间保持稳定。
+6. 如果命令失败，再看 `references/troubleshooting.md`；结果未知时先运行 `sau safety status`，核对平台原作品后再决定下一步。
+
+用户在最初请求中说“帮我发布”不构成对最终内容的确认。必须在 prepare 结果展示后停止，等待用户对账号、标题、正文、素材和排期的**新的明确确认**，再执行正式提交。
 
 ## 支持动作
 
@@ -43,6 +47,8 @@ summary: 使用 sau 登录抖音并发布视频或图文。
 - 使用 `sau douyin check --account <name>` 校验 cookie 是否有效
 - 使用 `sau douyin upload-video ...` 上传抖音视频
 - 使用 `sau douyin upload-note ...` 上传抖音图文
+- 使用 `sau safety status --platform douyin --account <name>` 查看本地未解决记录
+- 使用 `sau safety resolve ...` 在人工核对后记录结论（不登录、不重发）
 
 ## 命令选择建议
 
@@ -50,6 +56,15 @@ summary: 使用 sau 登录抖音并发布视频或图文。
 - 当用户只需要确认 cookie 状态时，使用 `check`
 - 当用户要发布视频时，使用 `upload-video`
 - 当用户要发布图文时，使用 `upload-note`
+- 除非用户已明确确认内容并授权立即发布，否则先使用 `--prepare-only` 预演
+
+## 发布安全约定
+
+- `--prepare-only` 不是离线操作：素材仍会上传，平台可能保存草稿。
+- 最终发表只点击一次；点击后结果不明时状态为 `submission_unknown`，此时**不要重发**，先到抖音创作中心核对原作品。
+- 存在 `submission_unknown` 或 `needs_human` 时，后续自动发布会被阻止；必须人工核对后用 `sau safety resolve` 记录结论。
+- 不要尝试绕过验证码、伪造指纹或规避平台风控；遇到验证时交给用户人工处理。
+- 不要声称“保证不封号”或“完全 exactly-once”；本机制只降低误发和重复提交风险。
 
 ## 执行前检查
 
@@ -57,6 +72,7 @@ summary: 使用 sau 登录抖音并发布视频或图文。
 - 如果 `sau` 不可用，按 `references/runtime-requirements.md` 里的回退方式处理
 - 当用户明确指定无头或有头模式时，显式传 `--headless` 或 `--headed`
 - 只有用户明确要求定时发布时，才使用 `--schedule`
+- 非交互场景建议传 `--request-id` 和 `--result`，便于幂等判断和事后核对
 - 如果登录流程生成了本地二维码图片，不要只把图片路径告诉用户
 - 二维码图片本身就是给用户扫码的，优先直接把本地图片展示/发送给用户
 
