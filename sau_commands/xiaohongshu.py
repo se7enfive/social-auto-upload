@@ -44,7 +44,7 @@ def register(platform_parsers):
         action_parser = xiaohongshu_actions.add_parser(action_name, help=f"Xiaohongshu {action_name}")
         action_parser.add_argument("--account", required=True, help="Xiaohongshu user-defined account_name")
         if action_name == "login":
-            add_runtime_flags(action_parser)
+            add_runtime_flags(action_parser, default_headless=False, allow_headless=False)
 
     xiaohongshu_upload_video_parser = xiaohongshu_actions.add_parser("upload-video", help="Upload one video to Xiaohongshu")
     xiaohongshu_upload_video_parser.add_argument("--account", required=True, help="Xiaohongshu user-defined account_name")
@@ -55,7 +55,7 @@ def register(platform_parsers):
     xiaohongshu_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     xiaohongshu_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional thumbnail path")
     add_publish_safety_flags(xiaohongshu_upload_video_parser)
-    add_runtime_flags(xiaohongshu_upload_video_parser)
+    add_runtime_flags(xiaohongshu_upload_video_parser, default_headless=False, allow_headless=False)
 
     xiaohongshu_upload_note_parser = xiaohongshu_actions.add_parser("upload-note", help="Upload one note to Xiaohongshu")
     xiaohongshu_upload_note_parser.add_argument("--account", required=True, help="Xiaohongshu user-defined account_name")
@@ -65,7 +65,7 @@ def register(platform_parsers):
     xiaohongshu_upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     xiaohongshu_upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     add_publish_safety_flags(xiaohongshu_upload_note_parser)
-    add_runtime_flags(xiaohongshu_upload_note_parser)
+    add_runtime_flags(xiaohongshu_upload_note_parser, default_headless=False, allow_headless=False)
 
 
 @dataclass(slots=True)
@@ -79,7 +79,7 @@ class XiaohongshuVideoUploadRequest:
     thumbnail_file: Path | None = None
     publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool = False
     prepare_only: bool = False
     result_file: Path | None = None
     request_id: str | None = None
@@ -96,14 +96,14 @@ class XiaohongshuNoteUploadRequest:
     publish_date: datetime | int
     publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool = False
     prepare_only: bool = False
     result_file: Path | None = None
     request_id: str | None = None
     timeout: float = DEFAULT_PUBLISH_TIMEOUT
 
 
-async def login_xiaohongshu_account(account_name: str, headless: bool = True) -> dict:
+async def login_xiaohongshu_account(account_name: str, headless: bool = False) -> dict:
     account_file = resolve_account_file("xiaohongshu", account_name)
     with session_lock(account_file, "xiaohongshu", account_name):
         return await xiaohongshu_setup(str(account_file), handle=True, return_detail=True, headless=headless)
@@ -112,8 +112,6 @@ async def login_xiaohongshu_account(account_name: str, headless: bool = True) ->
 async def check_xiaohongshu_account(account_name: str) -> bool:
     account_file = resolve_account_file("xiaohongshu", account_name)
     with session_lock(account_file, "xiaohongshu", account_name):
-        if not account_file.exists():
-            return False
         return await xiaohongshu_cookie_auth(str(account_file))
 
 

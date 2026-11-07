@@ -24,6 +24,19 @@
 - 修正发布成功判断，读取成功弹层打开的 `/pin/<作品ID>` 详情链接；链接读取失败时保留已发表状态。
 - 作品查询兼容新版视频链接；定时发布标为实验性功能。
 
+### 本机 Chrome 登录态（抖音 / 小红书 / 视频号）
+
+- 新增 `utils/local_chrome.py`：统一用 patchright 启动本机 Google Chrome 的持久化专用 profile，默认读取 `LOCAL_CHROME_PATH`，不可用时按系统 Chrome 通道查找；不提供 Chromium 或 CDP 回退。
+- 三个平台的登录、检查、视频／图文发布全部迁移到专用 profile；登录态保存在 profile 中，`cookies/<platform>_<account>.json` 改为首次导入和原子导出备份，不再作为运行时会话载体。导入成功写 `.sau-storage-import.json` 标记，标记和 journal 均不保存凭证。
+- 每个 `--account` 对应独立 profile，默认位于 `.local/chrome-profiles/<platform>/`；可用 `LOCAL_CHROME_PROFILE_ROOT` 改写根目录，用 `LOCAL_CHROME_IMPORT_STORAGE_STATE=False` 关闭首次导入。
+- 抖音、小红书、视频号始终有头运行；CLI 在参数解析阶段拒绝 `--headless`（退出码 2），`--headed` 仅为兼容旧脚本保留。uploader 内另有 `ensure_headed()` 兜底。
+- 登录、检查和上传每次只启动一个浏览器 context；登录成功后的复检在同一 context 新开页面，不再嵌套启动第二个浏览器；上传结束只关闭 context。
+- 视频号的 login／check／upload 接入账号级 `session_lock`，与专用 profile 锁共同防止同账号并发。
+- 修复视频号 `--draft` 卡死：保存草稿后网页不跳转，改为等待 `post_draft` 接口成功响应；上传完成等待也按模式选择「保存草稿」／「发表」按钮。
+- 新增 `tests/test_local_chrome.py`（33 项）、`tests/test_tencent_commands.py`（10 项）、`tests/test_local_chrome_source_guard.py`（2 项），并扩展 CLI、发布安全和上传器测试；18 个相关测试模块共 208 项通过。静态防回归禁止三个生产上传器再次出现 `playwright.chromium.launch(`、`headless=True`、`storage_state=`、`connect_over_cdp(` 等写法。
+- 文档、Skills 与示例同步更新：抖音、小红书、视频号默认使用可见的本机 Chrome，不再示例 `--headless`；[CLI 使用说明](./docs/CLI.md#准备浏览器) 和 [本机安装与架构导览](./docs/local-setup-and-architecture.md#本机-chrome-迁移2026-11-07) 说明 profile、导入／导出和并发限制。
+- 真实账号已完成非公开验收：三个平台的 `check` 通过，抖音／小红书 `--prepare-only` 返回 `prepared`，视频号 `--draft` 保存成功；没有执行最终发表。正式发布仍需单独授权，并需清理验收留下的草稿。
+
 ### 发布安全（抖音 / 小红书）
 
 - 新增共享保护层 `utils/publish_safety.py`：账号级跨进程会话锁、原子 JSON journal、有界 deadline、内容指纹和单次提交控制。

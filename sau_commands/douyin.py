@@ -44,7 +44,7 @@ def register(platform_parsers):
         action_parser = douyin_actions.add_parser(action_name, help=f"Douyin {action_name}")
         action_parser.add_argument("--account", required=True, help="Douyin user-defined account_name")
         if action_name == "login":
-            add_runtime_flags(action_parser)
+            add_runtime_flags(action_parser, default_headless=False, allow_headless=False)
 
     upload_video_parser = douyin_actions.add_parser("upload-video", help="Upload one video to Douyin")
     upload_video_parser.add_argument("--account", required=True, help="Douyin user-defined account_name")
@@ -64,7 +64,7 @@ def register(platform_parsers):
     )
     upload_video_parser.add_argument("--collection", default=None, help="Optional collection name to add the work into (must already exist)")
     add_publish_safety_flags(upload_video_parser)
-    add_runtime_flags(upload_video_parser)
+    add_runtime_flags(upload_video_parser, default_headless=False, allow_headless=False)
 
     upload_note_parser = douyin_actions.add_parser("upload-note", help="Upload one note to Douyin")
     upload_note_parser.add_argument("--account", required=True, help="Douyin user-defined account_name")
@@ -76,7 +76,7 @@ def register(platform_parsers):
     upload_note_parser.add_argument("--bgm", default="", help="BGM music name to search and select")
     upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     add_publish_safety_flags(upload_note_parser)
-    add_runtime_flags(upload_note_parser)
+    add_runtime_flags(upload_note_parser, default_headless=False, allow_headless=False)
 
 
 @dataclass(slots=True)
@@ -94,7 +94,7 @@ class DouyinVideoUploadRequest:
     product_title: str = ""
     publish_strategy: str = DOUYIN_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool = False
     declaration: str | None = None
     collection_name: str | None = None
     prepare_only: bool = False
@@ -113,7 +113,7 @@ class DouyinNoteUploadRequest:
     publish_date: datetime | int
     publish_strategy: str = DOUYIN_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool = False
     bgm: str = ""
     prepare_only: bool = False
     result_file: Path | None = None
@@ -121,7 +121,7 @@ class DouyinNoteUploadRequest:
     timeout: float = DEFAULT_PUBLISH_TIMEOUT
 
 
-async def login_douyin_account(account_name: str, headless: bool = True) -> dict:
+async def login_douyin_account(account_name: str, headless: bool = False) -> dict:
     account_file = resolve_account_file("douyin", account_name)
     with session_lock(account_file, "douyin", account_name):
         return await douyin_setup(str(account_file), handle=True, return_detail=True, headless=headless)
@@ -130,8 +130,6 @@ async def login_douyin_account(account_name: str, headless: bool = True) -> dict
 async def check_douyin_account(account_name: str) -> bool:
     account_file = resolve_account_file("douyin", account_name)
     with session_lock(account_file, "douyin", account_name):
-        if not account_file.exists():
-            return False
         return await douyin_cookie_auth(str(account_file))
 
 

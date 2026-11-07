@@ -46,11 +46,11 @@ uv pip install -e .
 
 安装完成后，会注册 `sau` 命令。
 
-### 4. 安装 patchright Chromium
+### 4. 准备浏览器
 
-当前主线使用 `patchright` 驱动浏览器。
+抖音、小红书、视频号直接使用**本机 Google Chrome**，登录、校验和发布都会打开可见窗口。请先安装正式版 Google Chrome；Chrome 不在常规位置时，在 `conf.py` 设置 `LOCAL_CHROME_PATH`。这三个平台不需要 `patchright install chromium`，也不接受 `--headless`。
 
-国内用户推荐先指定镜像，再安装 Chromium。
+其他仍使用 patchright 的平台需要安装 Chromium。国内用户推荐先指定镜像：
 
 Windows PowerShell：
 
@@ -76,8 +76,10 @@ Windows 也可以直接手动复制并重命名。
 
 当前通常还会用到这些配置项：
 
-- `LOCAL_CHROME_PATH`
-- `LOCAL_CHROME_HEADLESS`
+- `LOCAL_CHROME_PATH`：本机 Chrome 可执行文件路径；留空时按系统 Chrome 通道查找
+- `LOCAL_CHROME_PROFILE_ROOT`：专用 Chrome profile 根目录；留空时使用 `<状态目录>/chrome-profiles`
+- `LOCAL_CHROME_IMPORT_STORAGE_STATE`：首次是否从 `cookies/*.json` 导入登录态，默认 `True`
+- `LOCAL_CHROME_HEADLESS`：只影响尚未迁移的旧平台，抖音／小红书／视频号始终有头
 - `DEBUG_MODE`
 
 `XHS_SERVER` 目前只和小红书旧流程相关。
@@ -179,7 +181,7 @@ sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --titl
 uv pip install -e .
 ```
 
-4. 如需浏览器驱动，优先使用：
+4. 准备浏览器：抖音、小红书、视频号需要本机 Google Chrome；其他 patchright 平台需要 Chromium。国内镜像安装方式：
 
 Windows PowerShell：
 
@@ -193,7 +195,9 @@ Linux / macOS：
 PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright" patchright install chromium
 ```
 
-5. 安装完成后，优先检查：
+5. 抖音、小红书、视频号的登录、校验和发布都会打开可见的本机 Chrome 窗口。不要传 `--headless`，也不要尝试用 Playwright Chromium 代替本机 Chrome；首次登录需要用户扫码或完成验证。
+
+6. 安装完成后，优先检查：
 
 ```bash
 sau --help
@@ -203,7 +207,7 @@ sau xiaohongshu --help
 sau bilibili --help
 ```
 
-6. 如果用户的目标是抖音或快手的登录、cookie 校验、视频上传、图文上传，优先走 CLI：
+7. 如果用户的目标是抖音或快手的登录、cookie 校验、视频上传、图文上传，优先走 CLI：
 
 ```bash
 sau douyin login
@@ -226,7 +230,7 @@ sau bilibili check
 sau bilibili upload-video
 ```
 
-7. 如果用户明确在使用 skill 系统，再引导其阅读：
+8. 如果用户明确在使用 skill 系统，再引导其阅读：
 
 - `skills/douyin-upload/SKILL.md`
 - `skills/douyin-upload/references/cli-contract.md`
@@ -242,6 +246,9 @@ sau bilibili upload-video
 - 当登录流程生成本地二维码图片时，不要只把图片路径发给用户
 - 这类二维码图片本身就是给用户扫码的，agent 应优先直接展示/发送本地图片给用户扫码
 - 如果环境支持查看本地图片，优先用查看图片能力把二维码展示出来；路径只作为补充信息
+- 抖音、小红书、视频号使用本机 Chrome 专用 profile，默认位于 `.local/chrome-profiles/`；登录态以 profile 为准，`cookies/*.json` 仅作首次导入和备份
+- 同一账号的 Chrome profile 不能并发打开；不要删除 profile 或 cookie 文件来绕过登录问题
+- 抖音、小红书、视频号不接受 `--headless`；用户要求无头时应说明该限制，不要改用 Playwright Chromium
 - Bilibili 登录当前不建议 agent 在非交互环境里直接代跑
 - 正确做法是让用户自己在本地终端执行 `sau bilibili login --account <name>`；如果二维码显示不完整，再提示用户打开 `qrcode.png`
 - `requirements.txt` 目前是历史兼容文件，不是主安装入口

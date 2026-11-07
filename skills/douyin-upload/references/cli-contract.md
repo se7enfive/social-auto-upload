@@ -13,11 +13,13 @@ sau douyin login --account <account>
 - 必填参数:
   - `--account`
 - 作用:
-  - 启动抖音登录流程，为指定账号生成或刷新 cookie 文件
+  - 在专用本机 Chrome profile 中启动抖音登录流程，并把登录态导出为 `cookies/douyin_<account>.json` 备份
+  - 如果专用 profile 已经登录，会直接复用，不重复生成二维码
   - 如果登录过程中生成本地二维码图片，agent 应优先直接把图片展示/发送给用户扫码，而不是只回传路径
 - 账号说明:
   - `--account` 传的是用户自定义的 `account_name`，不是固定只能叫 `creator`
-  - 一个 `account_name` 对应一个账号文件，可用于多账号隔离和并发任务
+  - 一个 `account_name` 对应一个专用 Chrome profile 和一份导出的账号 JSON，可用于多账号隔离
+  - 同一账号 profile 同一时间只能有一个进程使用
 
 ### 校验 cookie
 
@@ -49,7 +51,7 @@ sau douyin upload-video \
   [--request-id <stable-id>] \
   [--timeout <seconds>] \
   [--debug] \
-  [--headless | --headed]
+  [--headed]
 ```
 
 - 必填参数:
@@ -68,7 +70,6 @@ sau douyin upload-video \
   - `--request-id`
   - `--timeout`
   - `--debug`
-  - `--headless`
   - `--headed`
 
 ### 上传图文
@@ -86,7 +87,7 @@ sau douyin upload-note \
   [--request-id <stable-id>] \
   [--timeout <seconds>] \
   [--debug] \
-  [--headless | --headed]
+  [--headed]
 ```
 
 - 必填参数:
@@ -102,8 +103,15 @@ sau douyin upload-note \
   - `--request-id`
   - `--timeout`
   - `--debug`
-  - `--headless`
   - `--headed`
+
+## 浏览器运行形态
+
+- 登录、校验和上传都使用本机 Google Chrome 的专用 profile，并始终打开可见窗口。
+- `--headless` 不被支持，传入会在参数解析阶段以退出码 2 失败；不要尝试用其他方式绕过。
+- `--headed` 仅为兼容旧脚本保留，传入不会改变行为。
+- 同一账号 profile 同一时间只允许一个进程操作；遇到占用错误时先关闭该账号残留的自动化 Chrome。
+- `cookies/douyin_<account>.json` 只用于首次导入和备份；日常以专用 profile 中的登录态为准。
 
 ## 发布策略
 

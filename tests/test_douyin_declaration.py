@@ -71,30 +71,29 @@ class DouyinDeclarationTests(unittest.TestCase):
         locator.wait_for = AsyncMock()
         locator.count = AsyncMock(return_value=1)
         page = MagicMock()
+        page.url = "https://creator.douyin.com/creator-micro/content/upload"
         page.goto = AsyncMock()
         page.wait_for_url = AsyncMock()
         page.wait_for_selector = AsyncMock()
         page.wait_for_timeout = AsyncMock()
         page.locator.return_value = locator
+        page.get_by_text.return_value.count = AsyncMock(return_value=0)
 
         context = MagicMock()
         context.new_page = AsyncMock(return_value=page)
         context.close = AsyncMock(side_effect=OSError("close failed"))
-        browser = MagicMock()
-        browser.new_context = AsyncMock(return_value=context)
-        browser.close = AsyncMock()
         playwright = MagicMock()
-        playwright.chromium.launch = AsyncMock(return_value=browser)
+        playwright.chromium.launch = AsyncMock(side_effect=AssertionError("不得启动 Chromium"))
 
         with (
-            patch.object(douyin_main, "set_init_script", AsyncMock(return_value=context)),
+            patch.object(douyin_main, "launch_local_chrome", AsyncMock(return_value=context)),
             patch.object(douyin_main.asyncio, "sleep", AsyncMock()),
             self.assertRaisesRegex(RuntimeError, "自主声明"),
         ):
             asyncio.run(video.upload(playwright))
 
+        playwright.chromium.launch.assert_not_called()
         context.close.assert_awaited_once()
-        browser.close.assert_awaited_once()
 
 
 if __name__ == "__main__":

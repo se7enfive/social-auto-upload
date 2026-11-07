@@ -98,6 +98,8 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 
 `✅` 表示支持，`-` 表示不适用或未提供；`开发中`、`实验性` 不计入稳定能力。文章正文可以包含图片，与独立图文发布分列。
 
+> 抖音、小红书、视频号的登录、校验和发布使用**本机 Google Chrome** 的专用 profile，全程打开可见窗口，不接受 `--headless`；其他平台仍使用各自原有浏览器方式。详见 [CLI 使用说明](./docs/CLI.md#准备浏览器)。
+
 ### 按内容形态
 
 | 内容形态 | 平台与入口 |
@@ -160,7 +162,7 @@ npx skills add dreammis/social-auto-upload --skill douyin-upload
 
 #### 账号准备
 
-每个平台先登录一次，再检查会话。`--account` 是你给本地会话取的名字，例如 `creator`，用于区分多个账号。
+每个平台先登录一次，再检查会话。`--account` 是你给本地会话取的名字，例如 `creator`，用于区分多个账号。抖音、小红书、视频号会打开可见的本机 Chrome 窗口；首次登录需由用户扫码或完成验证，登录态保存在该账号的专用 Chrome profile 中。
 
 ```bash
 sau douyin login --account creator
@@ -251,7 +253,7 @@ sau dayu upload-article --account <account_name> --title "如何阅读作品数�
 补充说明：
 
 - `creator` 之类的名字只是示例值，真正含义是 `account_name`
-- 一个 `account_name` 对应一个账号文件，可以准备多个账号，也可以按账号名并发执行任务
+- 一个 `account_name` 对应一个账号文件；抖音、小红书、视频号还对应一个专用本机 Chrome profile。可以准备多个账号，但同一账号的 profile 不能并发打开
 - 抖音视频发布若触发短信二次验证，程序会优先读取项目根目录下的 `verify_code.txt`；如果你是在本地交互式终端手动运行 CLI，也可以直接按终端提示输入验证码
 - 浏览器平台统一约定：
 - 视频使用 `title + desc + tags`

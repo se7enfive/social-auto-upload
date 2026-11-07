@@ -58,9 +58,18 @@ sau zhihu --help
 sau safety --help
 ```
 
-## 安装 patchright 浏览器
+## 准备浏览器
 
-Windows 下推荐先指定镜像，再安装 Chromium：
+抖音、小红书、视频号使用**本机 Google Chrome** 的专用 profile，登录、校验和发布全过程都会打开可见窗口；不会回退到 Chromium，也不支持 `--headless`。
+
+- 默认使用系统安装的 Google Chrome。Chrome 不在常规位置时，在 `conf.py` 设置 `LOCAL_CHROME_PATH` 为实际可执行文件路径；配置无效或留空时按系统 Chrome 通道查找。
+- 每个 `--account` 使用独立 profile，默认位于 `.local/chrome-profiles/<platform>/`。同一 profile 同一时间只能被一个进程打开，否则命令会明确报错。
+- 首次运行会优先从 `cookies/<platform>_<account>.json` 导入登录态；登录和发布后会原子导出该 JSON 作为备份。日常以专用 profile 中的登录态为准，JSON 不再作为运行时载体。
+- `conf.LOCAL_CHROME_PROFILE_ROOT` 可改写 profile 根目录；`conf.LOCAL_CHROME_IMPORT_STORAGE_STATE = False` 可关闭首次 JSON 导入。
+- 不要删除 profile 目录来“重置”登录态；需要重新登录时执行对应平台的 `login`。
+- 该迁移不覆盖快手、Bilibili、百家号、Instagram 等平台；这些仍使用各自原有浏览器方式。
+
+其余仍使用 patchright 的平台，需要安装 Chromium。Windows 下推荐先指定镜像：
 
 ```powershell
 $env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchright install chromium
@@ -111,11 +120,12 @@ sau zhihu upload-video --account creator --file videos/demo.mp4 --title "知乎�
 
 ```bash
 sau douyin login --account <account_name>
-sau douyin login --account <account_name> --headless
 sau douyin check --account <account_name>
 sau douyin upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags 运动,训练
 sau douyin upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --tags 图文,测试
 ```
+
+抖音登录、检查和发布始终使用可见的本机 Chrome；`--headless` 会在参数解析阶段被拒绝，`--headed` 仅为兼容旧脚本保留。首次登录需要用户在打开的 Chrome 窗口中扫码或完成验证。
 
 抖音短信验证码补充说明：
 
@@ -142,7 +152,7 @@ sau xiaohongshu upload-video --account <account_name> --file videos/demo.mp4 --t
 sau xiaohongshu upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --tags 图文,测试
 ```
 
-海外环境如果无法登录默认创作者后台，可以通过环境变量切换到 RedNote 域名。该设置同时作用于登录、cookie 校验、视频发布和图文发布：
+小红书登录、检查和发布始终使用可见的本机 Chrome；`--headless` 会在参数解析阶段被拒绝。首次登录需要用户在打开的 Chrome 窗口中扫码或完成验证。海外环境如果无法登录默认创作者后台，可以通过环境变量切换到 RedNote 域名。该设置同时作用于登录、cookie 校验、视频发布和图文发布：
 
 ```bash
 SAU_XHS_CREATOR_BASE_URL=https://creator.rednote.com sau xiaohongshu login --account <account_name>
@@ -268,7 +278,7 @@ sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title
 sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --draft
 ```
 
-视频号登录和上传依赖浏览器中的登录态。无头模式下如果需要扫码，CLI 会生成临时二维码；需要人工查看页面时可以加 `--headed`。
+视频号登录和上传依赖本机 Chrome 专用 profile 中的登录态，全程使用可见窗口；`--headless` 会被拒绝。首次登录若需要扫码，CLI 会生成本地二维码图片，同时也可以直接在打开的 Chrome 窗口中扫码。登录成功后登录态保存在专用 profile，并导出到 `cookies/tencent_<account_name>.json` 作为备份。
 
 ## 百家号 CLI 子命令
 
@@ -422,15 +432,15 @@ CLI 将 `debug` 和 `headless` 拆成了两个独立维度：
 ```
 
 - `--debug`: 打开调试行为，例如失败时保留更多调试信息
-- `--headless`: 无头模式运行
+- `--headless`: 无头模式运行；仅适用于尚未迁移的平台
 - `--headed`: 有头模式运行
 
-如果都不传，CLI 当前默认按 `headless=True` 运行。
+默认值按平台区分：
 
-补充：
+- **抖音、小红书、视频号始终有头**，并强制使用本机 Google Chrome；传 `--headless` 会在参数解析阶段以退出码 2 失败，`--headed` 可兼容旧脚本但不会改变行为。
+- 其他平台仍按原行为默认 `headless=True`；需要人工查看页面时显式传 `--headed`。
 
-- 抖音和快手的 CLI 默认都是无头模式
-- 如果用户明确要求可见浏览器窗口，或确实需要人工看页面，再显式传 `--headed`
+`--headless` 的拒绝发生在任何浏览器启动、账号读取或平台访问之前。
 
 ## 视频上传参数
 

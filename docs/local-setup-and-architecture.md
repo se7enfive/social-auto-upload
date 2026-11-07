@@ -1,6 +1,6 @@
 # 本机安装与架构导览
 
-记录日期：2026-11-06。对应仓库快照：`3847fff`。
+记录日期：2026-11-06；本机 Chrome 迁移更新：2026-11-07。对应基线快照：`3847fff`。
 
 ## 一、本机安装
 
@@ -13,9 +13,9 @@
 | 项目安装方式 | `uv pip install -e .`，源码修改直接对本地安装生效 |
 | 项目版本 | `social-auto-upload 0.1.0` |
 | 浏览器驱动 | `patchright 1.58.2` |
-| 本地配置 | 根目录 `conf.py`，基于 `conf.example.py`；`LOCAL_CHROME_PATH` 指向本机 Chrome |
-| 主线配套浏览器 | Chromium 145.0.7632.6（revision 1208），`channel="chromium"` 的无头与有头本地交互均通过 |
-| 本机 Chrome | 156.0.8078.81，保留给实际支持 `LOCAL_CHROME_PATH` 的平台流程，不能代替所有配套 Chromium 调用 |
+| 本地配置 | 根目录 `conf.py`，基于 `conf.example.py`；`LOCAL_CHROME_PATH` 指向本机 Chrome，另有专用 profile 配置 |
+| 主线配套浏览器 | Chromium 145.0.7632.6（revision 1208），供快手、百家号、Instagram 等尚未迁移的 patchright 平台使用 |
+| 本机 Chrome | 156.0.8078.81；自 2026-11-07 起，抖音、小红书、视频号的登录、校验和发布直接使用它的专用 profile |
 | Node.js | 已有 22.21.1；不是基础视频／图文 CLI 的必需依赖 |
 
 `conf.py` 和 `.venv` 均已被仓库现有 `.gitignore` 排除；本次未更改全局 Python 或权限配置。
@@ -29,8 +29,8 @@
 uv venv --python 3.12
 uv pip install -e .
 
-# 主线抖音／小红书的 channel="chromium" 需要配套浏览器。
-# --no-shell 对应本次已验证的新无头／有头启动方式。
+# 其余仍使用 patchright Chromium 的平台需要配套浏览器。
+# 抖音、小红书、视频号已迁移到本机 Chrome，不需要这一步。
 .\.venv\Scripts\patchright.exe install chromium --no-shell
 
 # 不需要激活虚拟环境，直接调用项目自己的入口。
@@ -43,11 +43,13 @@ uv pip install -e .
 LOCAL_CHROME_PATH = "C:/Program Files/Google/Chrome/Application/chrome.exe"
 ```
 
-**安装过程与结论更正：** 首次官方 Chromium 下载很慢；默认 npmmirror 的 Playwright 路径返回 404。曾先验证系统 Chrome，但底层核对发现，抖音和小红书主要登录／上传路径硬编码 `channel="chromium"`，不会完整采用 `LOCAL_CHROME_PATH`，所以仅凭系统 Chrome 不能宣布这些路径已就绪。现已从 Chrome for Testing 的可用镜像补齐 **145.0.7632.6 / revision 1208**：归档大小与 Google 官方 HTTPS 元数据一致（181196793 字节），MD5 为 `d2889c5c2fadbd9d2271d512a063cac9`，ZIP CRC 校验通过；再由标准官方安装器完成检查。
+**安装过程与结论更正：** 首次官方 Chromium 下载很慢；默认 npmmirror 的 Playwright 路径返回 404。曾先验证系统 Chrome，但当时底层核对发现，抖音和小红书主要登录／上传路径硬编码 `channel="chromium"`，不会完整采用 `LOCAL_CHROME_PATH`，所以仅凭系统 Chrome 不能宣布这些路径已就绪。现已从 Chrome for Testing 的可用镜像补齐 **145.0.7632.6 / revision 1208**：归档大小与 Google 官方 HTTPS 元数据一致（181196793 字节），MD5 为 `d2889c5c2fadbd9d2271d512a063cac9`，ZIP CRC 校验通过；再由标准官方安装器完成检查。
 
-已使用与主线相同的 `channel="chromium"`、不指定 `executable_path`，分别跑通无头与有头的本地页面点击验证。配套浏览器位于 `C:/Users/A/AppData/Local/ms-playwright/chromium-1208/chrome-win64/chrome.exe`。参见 `uploader/douyin_uploader/main.py` 中 `DouYinVideo.upload`／`DouYinNote.upload` 和 `uploader/xiaohongshu_uploader/main.py` 中 `XiaoHongShuVideo.upload`／`XiaoHongShuNote.upload` 的启动调用。本次没有额外安装 `chromium-headless-shell`；如果外部脚本使用不指定 channel 的默认无头启动方式，可按需完整执行 `patchright install chromium`。
+> 以上是 2026-11-06 的历史状态。2026-11-07 已完成抖音、小红书、视频号的迁移，三个平台现在使用本机 Chrome 的持久化专用 profile，不再调用 Chromium；旧 Chromium 仅保留给其他 patchright 平台。详见下文“本机 Chrome 迁移”。
 
-当前未配置 YouTube 代理，也未保存任何平台凭证。`LOCAL_CHROME_PATH` 只影响实际读取它的流程，不是统一的浏览器覆盖开关；非空配置与配套 Chromium 可以并存。
+**历史记录（2026-11-06，已被迁移取代）：** 当时使用与主线相同的 `channel="chromium"`、不指定 `executable_path`，分别跑通无头与有头的本地页面点击验证。配套浏览器位于 `C:/Users/A/AppData/Local/ms-playwright/chromium-1208/chrome-win64/chrome.exe`。参见 `uploader/douyin_uploader/main.py` 中 `DouYinVideo.upload`／`DouYinNote.upload` 和 `uploader/xiaohongshu_uploader/main.py` 中 `XiaoHongShuVideo.upload`／`XiaoHongShuNote.upload` 的启动调用。本次没有额外安装 `chromium-headless-shell`；如果外部脚本使用不指定 channel 的默认无头启动方式，可按需完整执行 `patchright install chromium`。
+
+当前未配置 YouTube 代理，也未保存任何平台凭证。`LOCAL_CHROME_PATH` 只影响实际读取它的流程；迁移后的抖音、小红书、视频号会读取它来定位本机 Chrome。配套 Chromium 与专用 Chrome profile 可以并存。
 
 ### 验证范围
 
@@ -61,8 +63,9 @@ LOCAL_CHROME_PATH = "C:/Program Files/Google/Chrome/Application/chrome.exe"
 - 实际执行 `sau article render`：将临时 HTML 原稿转换为本地 HTML，确认中文正文和加粗保留；不需要 Node.js 渲染依赖、不登录、不发布。
 - 10 个浏览器平台 CLI 参数解析测试。
 - 5 个模拟依赖的 Bilibili CLI 测试。
+- 2026-11-07：新增 `tests/test_local_chrome.py`（33 项）、`tests/test_tencent_commands.py`（10 项）和 `tests/test_local_chrome_source_guard.py`（2 项），并扩展 CLI、发布安全和上传器测试；18 个相关测试模块共 208 项通过。
 
-以上不是完整测试套件，也不代表任意平台当前都能成功发布。本次不执行平台登录、会话检查、真实上传或发表。
+以上不是完整测试套件，也不代表任意平台当前都能成功发布。2026-11-07 的本机 Chrome 迁移验收执行了三个平台的账号 `check`、抖音／小红书 `--prepare-only` 和视频号 `--draft`，均未做最终发表；正式发布仍需单独授权。
 
 可复跑的无真实上传测试：
 
@@ -124,7 +127,8 @@ sau_cli.py
 sau_commands/：命令与参数、平台业务调度
   │
   ├─ 浏览器平台 ──► uploader/ 下对应实现
-  │                  └─► patchright + Chromium
+  │                  ├─► 抖音／小红书／视频号：patchright + 本机 Chrome 专用 profile
+  │                  └─► 其他网页平台：patchright + Chromium
   │                        └─► 平台创作者后台
   │
   ├─ Bilibili ────► uploader/bilibili_uploader/
@@ -161,6 +165,7 @@ pyproject.toml:21 注册 sau_cli:main
 | `sau_cli.py:53` | 顶层入口与异常处理；异常写 stderr，返回退出码 1 |
 | `sau_commands/arguments.py:16` | 账号路径、文件、标签、时间及运行参数等共用处理 |
 | `uploader/base_video.py:7` | `BaseVideoUploader`，主要负责文件和定时时间校验 |
+| `utils/local_chrome.py` | 抖音、小红书、视频号的本机 Chrome 启动、专用 profile、登录态导入与备份导出 |
 
 `uv` 到安装和环境管理这一层就结束了，不参与上传调度或浏览器操作。未激活环境时直接执行 `.venv/Scripts/sau.exe` 即可。
 
@@ -175,13 +180,14 @@ sau douyin login --account <别名>
   → login_douyin_account()
   → resolve_account_file("douyin", 别名)
   → douyin_setup(handle=True, return_detail=True)
-  → 先校验已有会话；没有有效会话则进入二维码登录
-  → context.storage_state(path=账号文件)
+  → 启动本机 Chrome 的专用持久化 profile
+  → 已有登录态则直接复用；否则进入二维码登录
+  → 登录态留在 profile，并原子导出 cookies/douyin_<别名>.json 备份
 
 sau douyin check --account <别名>
   → check_douyin_account()
-  → cookie_auth()
-  → 浏览器恢复 storage_state 并访问上传页
+  → douyin_cookie_auth()
+  → 启动同一专用 profile，访问上传页
   → 根据 URL 与登录元素判断 valid / invalid
 ```
 
@@ -194,10 +200,11 @@ sau douyin upload-video
   → run() 构造 DouyinVideoUploadRequest
   → upload_video() → douyin_setup(handle=False)
   → DouYinVideo.douyin_upload_video() → upload()
-  → 恢复账号会话、上传文件、填写表单
+  → 启动本机 Chrome 专用 profile、上传文件、填写表单
   → 处理声明／合集／封面／定时等平台字段
   → 点击发布，等待跳转到 content/manage
-  → 刷新 storage_state，命令层输出 upload submitted
+  → 导出账号 JSON 备份并关闭 context
+  → 命令层输出 upload submitted
 ```
 
 命令层见 `sau_commands/douyin.py:115`、`:188`；实现见 `uploader/douyin_uploader/main.py:971`、`:1099`、`:1112`、`:1118`。
@@ -222,31 +229,45 @@ sau douyin upload-note
 ```text
 login
   → login_xiaohongshu_account() → xiaohongshu_setup(handle=True)
-  → 二维码登录 → 保存 storage_state → cookie_auth 再核验
+  → 本机 Chrome 专用 profile 中二维码登录
+  → 登录态留在 profile，导出 cookies/xiaohongshu_<别名>.json 备份
 
 check
-  → check_xiaohongshu_account() → cookie_auth()
-  → 恢复会话，访问创作者视频页，判断登录路径和登录框
+  → check_xiaohongshu_account() → xiaohongshu_cookie_auth()
+  → 启动同一专用 profile，访问创作者视频页，判断登录路径和登录框
 
 upload-video
   → upload_xiaohongshu_video() → XiaoHongShuVideo.main()
   → xiaohongshu_upload_video() → upload() → upload_video_content()
-  → 上传、填写、发布 → 等待 /publish/success → 刷新会话
+  → 上传、填写、发布 → 等待 /publish/success → 导出备份并关闭 context
 
 upload-note
   → upload_xiaohongshu_note() → XiaoHongShuNote.main()
   → xiaohongshu_upload_note() → upload() → upload_note_content()
-  → target=image 表单 → 上传、填写、发布 → 等待成功页
+  → target=image 表单 → 上传、填写、发布 → 等待成功页 → 导出备份并关闭 context
 ```
 
 命令层入口见 `sau_commands/xiaohongshu.py:85`、`:90`、`:97`、`:121`；底层登录与校验见 `uploader/xiaohongshu_uploader/main.py:177`、`:219`、`:242`、`:273`；视频流程见 `:623`、`:701`、`:721`、`:725`；图文流程见 `:771`、`:824`、`:844`、`:848`。
+
+### 本机 Chrome 迁移（2026-11-07）
+
+迁移覆盖抖音、小红书、视频号。三者共用 `utils/local_chrome.py` 管理浏览器与登录态，页面流程仍由各自 uploader 维护。
+
+- **持久化上下文**：使用 `launch_persistent_context(user_data_dir=...)`，优先 `LOCAL_CHROME_PATH`，否则按系统 Chrome 通道查找；始终 `headless=False`，没有 Chromium 或 CDP 回退。
+- **profile 路径**：`<profile_root>/<platform>/<账号文件名主干>-<sha256(规范化账号路径)[:12]>`，默认根目录为 `<状态目录>/chrome-profiles`。同一账号文件稳定复用同一 profile，不同账号相互隔离。
+- **登录态**：cookie 直接写入专用 profile。首次发现 profile 没有目标域 cookie 时，从 `cookies/<platform>_<account>.json` 导入 cookie 和 localStorage；成功后写入 `.sau-storage-import.json` 标记（只含数量、来源和时间，不含凭证）。登录或发布结束后原子导出 JSON 备份，失败只告警。
+- **进程互斥**：Chrome 自身的 profile 锁会阻止同一目录被两个浏览器实例打开；`sau` 命令层还会获取账号级 `session_lock`，视频号的 login／check／upload 均已接入。
+- **有头约束**：CLI 在参数解析阶段拒绝 `--headless`；uploader 内的 `ensure_headed()` 再兜底，防止程序化构造 headless 请求。
+- **单次启动**：登录、校验和上传每次只启动一个 context。登录成功后的复检在同一 context 新开页面，不嵌套启动第二个浏览器；上传结束用 `close_browser_resources(context, None)` 关闭 context。
+- **防回归**：`tests/test_local_chrome_source_guard.py` 扫描三个生产源文件，禁止 `playwright.chromium.launch(`、`headless=True`、`storage_state=`、`connect_over_cdp(` 等回退写法。
+- **视频号草稿**：网页端保存草稿后不跳转，`--draft` 以 `post_draft` 接口的成功响应作为完成信号；不能等待 `/post/list` 跳转。
 
 ### 统一到什么程度，没有统一什么
 
 这个项目适合概括为 **“统一 CLI 外观 + 逐平台适配器”**，不能当作已经具备统一状态机和全平台事务的发布引擎。
 
 - `BaseVideoUploader` 共用文件、图片扩展名和时间校验，并没有统一登录协议、浏览器生命周期或发布结果类型；文章和 Bilibili 等流程也不都依赖该基类。
-- 浏览器的 launch/context 等控制仍分散在平台实现中；同一个 CLI 并不意味着相同的页面步骤和成功判断。
+- 浏览器的 launch/context 控制：抖音、小红书、视频号已集中到 `utils/local_chrome.py`；其他平台仍分散在各自实现中。同一个 CLI 并不意味着相同的页面步骤和成功判断。
 - 抖音、小红书等旧路径上传后通常返回账号文件路径，而不是统一的作品 ID；成功主要根据管理页／成功页跳转判断。
 - `upload submitted` 不能解读为“平台审核通过、作品最终公开可见”。部分发布等待循环也没有统一的全局期限，外层做批量调度时需要独立管理超时和状态。
 - 大鱼号、雪球、知乎等较新的实现提供了更细的身份绑定、结果持久化和 verify，但不能据此假设所有平台都具备相同能力。
@@ -255,13 +276,15 @@ upload-note
 
 `--help` 在 argparse 解析阶段退出，不会调用平台 `run()`，所以不会启动浏览器、联网验证账号或下载 biliup。其导入过程仍可能创建本地 `cookies/` 子目录和 `logs/`，不应把“无网络／无发布”写成“完全不写磁盘”。参见 `uploader/__init__.py:5` 与 `utils/log.py:42`。
 
-反过来，`check` 并不是纯本地安装检查：浏览器平台会实际访问平台，Bilibili 的 `check` 会准备 biliup 并执行 renew。较新平台的 `--prepare-only` 也可能恢复会话、上传素材和留下草稿，不能当作无副作用测试。
+反过来，`check` 并不是纯本地安装检查：浏览器平台会实际访问平台；迁移后的抖音、小红书、视频号会打开可见的本机 Chrome 窗口；Bilibili 的 `check` 会准备 biliup 并执行 renew。较新平台的 `--prepare-only` 也可能恢复会话、上传素材和留下草稿，不能当作无副作用测试。
 
-本机另做了系统 Chrome 和配套 Chromium 的独立本地点击验证，其中配套 Chromium 使用与主线一致的 `channel="chromium"`，有头和无头均通过。因此，结论不只是来自 `--help`；但仍不代表账号有效、网站可达、选择器兼容或真实发布成功。
+本机另做了系统 Chrome 和配套 Chromium 的独立本地点击验证：2026-11-06 的配套 Chromium 使用迁移前的 `channel="chromium"`，有头和无头均通过；2026-11-07 又验证了迁移后的本机 Chrome 持久化 profile 启动路径。因此，结论不只是来自 `--help`；但仍不代表账号有效、网站可达、选择器兼容或真实发布成功。
 
 ### 账号隔离、提交状态与定时发布
 
 主线 CLI 的会话文件规则为 `BASE_DIR/cookies/{platform}_{account}.json`，例如 `cookies/douyin_creator.json`；见 `sau_commands/arguments.py:16`。这和部分包导入时自动创建的历史子目录不是一回事。Bilibili 使用同一命名规则，但文件内容由 biliup 管理，不是所有平台都保存相同格式。
+
+迁移后的抖音、小红书、视频号还会把登录态写入专用 Chrome profile；上述 JSON 只承担首次导入和备份职责。`--account` 仍只是本地别名：不同别名可以绑定同一个远端账号，专用 profile 也不能替代远端身份去重。
 
 `--account` 是本地别名，不是远端用户名。两个别名可以绑定同一个远端账号；仅靠不同文件名不能保证真实账号互不相同。抖音、小红书旧路径没有额外的主体绑定文件；大鱼号、雪球、知乎会另存 `.identity.json` 并比对主体，见 `uploader/dayu_uploader/session.py:32`、`uploader/xueqiu_uploader/session.py:29`、`uploader/zhihu_uploader/session.py:35`。
 

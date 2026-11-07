@@ -41,6 +41,8 @@
 
 限制：不同 `--account` 别名可能绑定同一个远端账号，本机制只保证同一本地会话文件不并发，不做远端身份去重；仓库内历史直连脚本也不在这把锁的保护范围内。
 
+抖音、小红书、视频号还使用本机 Chrome 的专用 profile；Chrome 自身的 profile 锁会阻止同一账号目录被两个浏览器实例打开。它与 CLI 的 `session_lock` 互补：前者防止浏览器层面的并发，后者防止命令层重复进入发布流程。
+
 ### 2. 发布 journal
 
 每次发布在以下位置创建独立记录：
@@ -106,7 +108,7 @@ Agent 工作流中，准备与正式提交应使用不同但可关联的 `--requ
 
 ### 9. 资源清理
 
-`close_browser_resources()` 分别有界关闭 context 和 browser。context 关闭失败仍会尝试关闭 browser；清理错误只记录日志，不覆盖原始失败或已确认的提交状态。
+`close_browser_resources()` 分别有界关闭 context 和 browser。抖音、小红书、视频号使用持久化本机 Chrome context，没有独立 browser 对象，因此传入 `browser=None` 只关闭 context。context 关闭失败仍会尝试关闭 browser；清理错误只记录日志，不覆盖原始失败或已确认的提交状态。
 
 ### 10. 发布节奏（可选）
 
@@ -162,6 +164,7 @@ sau safety resolve \
 - 本保护层和发布节奏只覆盖 `sau` CLI 的四条路径。Web 控制台路径 `sau_backend.py`（Flask）→ `myUtils/postVideo.py`（`post_video_DouYin` / `post_video_xhs`）直接构造 `DouYinVideo` / `XiaoHongShuVideo`，绕过 `sau_commands` 包装，因此会话锁、journal、单次提交、风险停手和节奏限制都不生效。如需覆盖，应把 Web 路径迁移到 `sau_commands` 的上传函数，而不是复制保护逻辑。
 - 仓库内其他历史直连脚本（例如直接实例化上传器的示例）也不在这把锁的保护范围内。
 - 锁按本地账号文件路径隔离，不识别指向同一远端账号的不同别名；不做远端身份去重。
+- 抖音、小红书、视频号的专用 Chrome profile 由 `utils/local_chrome.py` 管理，journal 不保存 profile 内容或其中的 cookie。删除 profile 不是本保护层的恢复动作；需要重新登录时使用各平台 `login`。
 - 状态判定依赖平台页面已有的可证明信号，平台改版可能导致状态退化为 `submission_unknown`；此时按人工核对流程处理。
 
 ## 测试与验证

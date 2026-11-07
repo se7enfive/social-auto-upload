@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import inspect
-import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -14,10 +13,16 @@ from patchright.async_api import Page
 from patchright.async_api import Playwright
 from patchright.async_api import async_playwright
 
-from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from conf import BASE_DIR, DEBUG_MODE
 from uploader.base_video import BaseVideoUploader
-from utils.base_social_media import set_init_script
+from utils.local_chrome import (
+    ensure_headed,
+    export_storage_state,
+    has_local_session,
+    launch_local_chrome,
+)
 from utils.log import tencent_logger
+from utils.publish_safety import close_browser_resources
 
 TENCENT_LOGIN_URL = "https://channels.weixin.qq.com"
 TENCENT_HOME_URL = "https://channels.weixin.qq.com/platform"
@@ -25,6 +30,7 @@ TENCENT_UPLOAD_URL = "https://channels.weixin.qq.com/platform/post/create"
 TENCENT_MANAGE_URL = "https://channels.weixin.qq.com/platform/post/list"
 TENCENT_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 TENCENT_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
+_TENCENT_LOGIN_HINT = "请先运行 `sau tencent login --account <账号别名>` 完成本机 Chrome 登录。"
 
 
 def _msg(emoji: str, text: str) -> str:
@@ -69,15 +75,6 @@ def _build_login_result(
     }
 
 
-def _build_launch_kwargs(headless: bool) -> dict:
-    launch_kwargs = {"headless": headless}
-    if LOCAL_CHROME_PATH:
-        launch_kwargs["executable_path"] = LOCAL_CHROME_PATH
-    else:
-        launch_kwargs["channel"] = "chrome"
-    return launch_kwargs
-
-
 def _get_qrcode_utils():
     from utils.login_qrcode import build_login_qrcode_path
     from utils.login_qrcode import decode_qrcode_from_path
@@ -111,38 +108,83 @@ def format_str_for_short_title(origin_title: str) -> str:
     return formatted_string
 
 
+async def _tencent_page_logged_in(page: Page) -> bool:
+    # cookie 失效时, 页面先停在 post/create, 随后由前端 JS 跳转到登录页;
+    # 必须等待跳转完成再判断, 否则会误报"cookie 有效"
+    try:
+        await page.wait_for_url("**/login.html**", timeout=8000)
+        return False
+    except Exception:
+        pass  # 8 秒内未跳转, 大概率已登录
+
+    # 双保险: 页面里出现微信扫码登录 iframe 也视为失效
+    try:
+        for frame in page.frames:
+            if "open.weixin.qq.com/connect/qrconnect" in frame.url:
+                return False
+    except Exception:
+        return False
+
+    return str(page.url or "").startswith("https://channels.weixin.qq.com/")
+
+
+async def _recheck_tencent_login(context) -> bool | None:
+    """登录成功后在同一 context 新页面复核；异常或未稳定时返回 None，不推翻成功结论。"""
+    page = None
+    try:
+        page = await context.new_page()
+        await page.goto(TENCENT_UPLOAD_URL, wait_until="domcontentloaded", timeout=60000)
+        try:
+            await page.wait_for_url("**/login.html**", timeout=8000)
+            return False
+        except Exception:
+            pass
+        try:
+            if any("open.weixin.qq.com/connect/qrconnect" in frame.url for frame in page.frames):
+                return False
+        except Exception:
+            return None
+        if not str(page.url or "").startswith("https://channels.weixin.qq.com/"):
+            return None
+        return True
+    except Exception:
+        return None
+    finally:
+        if page is not None:
+            try:
+                await page.close()
+            except Exception:
+                pass
+
+
 async def cookie_auth(account_file):
     account_file = _resolve_account_file(account_file)
+    if not has_local_session("tencent", account_file):
+        return False
+
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=True))
+        context = None
         try:
-            context = await browser.new_context(storage_state=account_file)
-            context = await set_init_script(context)
-            page = await context.new_page()
-            await page.goto(TENCENT_UPLOAD_URL, wait_until="domcontentloaded")
-
-            # cookie 失效时, 页面先停在 post/create, 随后由前端 JS 跳转到登录页;
-            # 必须等待跳转完成再判断, 否则会误报"cookie 有效"
-            try:
-                await page.wait_for_url("**/login.html**", timeout=8000)
-                tencent_logger.info(_msg("🥹", "cookie 已失效（页面跳转到登录页），得重新登录一下"))
-                return False
-            except Exception:
-                pass  # 8 秒内未跳转, 大概率已登录
-
-            # 双保险: 页面里出现微信扫码登录 iframe 也视为失效
-            for fr in page.frames:
-                if "open.weixin.qq.com/connect/qrconnect" in fr.url:
-                    tencent_logger.info(_msg("🥹", "cookie 已失效（页面出现扫码登录框），得重新登录一下"))
-                    return False
-
-            tencent_logger.success(_msg("🥳", "cookie 有效"))
-            return True
-        except Exception as exc:
-            tencent_logger.warning(_msg("😵", f"cookie 校验时出错，按失效处理: {exc}"))
+            context = await launch_local_chrome(playwright, "tencent", account_file)
+            for _attempt in range(3):
+                page = await context.new_page()
+                try:
+                    await page.goto(TENCENT_UPLOAD_URL, wait_until="domcontentloaded")
+                    if await _tencent_page_logged_in(page):
+                        tencent_logger.success(_msg("🥳", "本机 Chrome 登录态有效"))
+                        return True
+                    tencent_logger.info(_msg("🥹", "本机 Chrome 登录态已失效，得重新登录一下"))
+                except Exception as exc:
+                    tencent_logger.warning(_msg("😵", f"登录态校验时出错: {exc}"))
+                finally:
+                    try:
+                        await page.close()
+                    except Exception:
+                        pass
             return False
         finally:
-            await browser.close()
+            if context is not None:
+                await close_browser_resources(context, None, timeout=15)
 
 
 async def _extract_tencent_qrcode_src(page: Page) -> str:
@@ -386,19 +428,35 @@ async def tencent_cookie_gen(
     qrcode_callback=None,
     poll_interval: int = 3,
     max_checks: int = 100,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    headless: bool = False,
 ):
+    ensure_headed("tencent", headless)
     account_file = _resolve_account_file(account_file)
     Path(account_file).parent.mkdir(parents=True, exist_ok=True)
 
+    qrcode_path = None
+    current_url = ""
+    result = _build_login_result(False, "failed", "视频号登录失败", account_file)
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=headless))
-        context = await browser.new_context()
-        qrcode_path = None
-        result = _build_login_result(False, "failed", "视频号登录失败", account_file)
+        context = None
         try:
+            context = await launch_local_chrome(playwright, "tencent", account_file)
             page = await context.new_page()
-            await page.goto(TENCENT_LOGIN_URL)
+            await page.goto(TENCENT_UPLOAD_URL, wait_until="domcontentloaded")
+            current_url = page.url
+            if await _tencent_page_logged_in(page):
+                await export_storage_state(context, account_file)
+                result = _build_login_result(
+                    True,
+                    "cookie_valid",
+                    "本机 Chrome 已有视频号登录态，无需重新扫码",
+                    account_file,
+                    current_url=current_url,
+                )
+                return result
+
+            await page.goto(TENCENT_LOGIN_URL, wait_until="domcontentloaded")
+            current_url = page.url
             try:
                 qrcode_info = await _save_tencent_qrcode(page, account_file, qrcode_callback=qrcode_callback)
                 qrcode_path = Path(qrcode_info["image_path"])
@@ -417,17 +475,19 @@ async def tencent_cookie_gen(
                 poll_interval=poll_interval,
                 max_checks=max_checks,
             )
+            current_url = result.get("current_url") or page.url
             if result["success"]:
                 await asyncio.sleep(2)
-                await context.storage_state(path=account_file)
-                if not await cookie_auth(account_file):
+                await export_storage_state(context, account_file)
+                recheck = await _recheck_tencent_login(context)
+                if recheck is False:
                     result = _build_login_result(
                         False,
                         "cookie_invalid",
-                        "视频号扫码流程结束，但 cookie 校验失败",
+                        "视频号扫码流程结束，但同一浏览器复核未通过",
                         account_file,
                         qrcode_info,
-                        page.url,
+                        current_url,
                     )
             return result
         except Exception as exc:
@@ -436,7 +496,7 @@ async def tencent_cookie_gen(
                 "failed",
                 str(exc),
                 account_file,
-                current_url=page.url if "page" in locals() else "",
+                current_url=current_url,
             )
             return result
         finally:
@@ -445,8 +505,8 @@ async def tencent_cookie_gen(
                 tencent_logger.info(_msg("🧹", f"临时二维码文件已清理: {qrcode_path}"))
             if not result["success"]:
                 tencent_logger.error(_msg("😢", f"登录失败: {result['message']}"))
-            await context.close()
-            await browser.close()
+            if context is not None:
+                await close_browser_resources(context, None, timeout=15)
 
 
 async def tencent_setup(
@@ -454,23 +514,29 @@ async def tencent_setup(
     handle=False,
     return_detail=False,
     qrcode_callback=None,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    headless: bool = False,
 ):
+    ensure_headed("tencent", headless)
     account_file = _resolve_account_file(account_file)
-    if not os.path.exists(account_file) or not await cookie_auth(account_file):
-        if not handle:
-            result = _build_login_result(False, "cookie_invalid", "cookie文件不存在或已失效", account_file)
-            return result if return_detail else False
 
-        tencent_logger.info(_msg("🥹", "cookie 失效了，准备打开浏览器重新登录"))
+    if handle:
         result = await tencent_cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless)
         return result if return_detail else result["success"]
 
-    result = _build_login_result(True, "cookie_valid", "cookie有效", account_file)
+    if not has_local_session("tencent", account_file):
+        result = _build_login_result(
+            False,
+            "cookie_invalid",
+            f"未找到视频号登录态（专用 Chrome profile 或 cookie 备份）。{_TENCENT_LOGIN_HINT}",
+            account_file,
+        )
+        return result if return_detail else False
+
+    result = _build_login_result(True, "cookie_valid", "本机 Chrome 登录态存在", account_file)
     return result if return_detail else True
 
 
-async def get_tencent_cookie(account_file, qrcode_callback=None, headless: bool = LOCAL_CHROME_HEADLESS):
+async def get_tencent_cookie(account_file, qrcode_callback=None, headless: bool = False):
     return await tencent_cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless)
 
 
@@ -479,7 +545,7 @@ async def weixin_setup(
     handle=False,
     return_detail=False,
     qrcode_callback=None,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    headless: bool = False,
 ):
     return await tencent_setup(
         account_file,
@@ -497,7 +563,7 @@ class TencentBaseUploader(BaseVideoUploader):
         account_file,
         publish_strategy: str = TENCENT_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = DEBUG_MODE,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool = False,
         collection_name: str | None = None,
     ):
         self.publish_date = publish_date
@@ -506,13 +572,14 @@ class TencentBaseUploader(BaseVideoUploader):
         self.debug = debug
         self.headless = headless
         self.collection_name = collection_name
-        self.local_executable_path = LOCAL_CHROME_PATH
 
     async def validate_base_args(self):
-        if not os.path.exists(self.account_file):
-            raise RuntimeError(f"cookie文件不存在，请先完成视频号登录: {self.account_file}")
-        if not await cookie_auth(self.account_file):
-            raise RuntimeError(f"cookie文件已失效，请先完成视频号登录: {self.account_file}")
+        ensure_headed("tencent", self.headless)
+        if not has_local_session("tencent", self.account_file):
+            raise RuntimeError(
+                f"未找到视频号登录态（专用 Chrome profile 或 cookie 备份）: {self.account_file}。"
+                f"{_TENCENT_LOGIN_HINT}"
+            )
         if self.publish_strategy not in {TENCENT_PUBLISH_STRATEGY_IMMEDIATE, TENCENT_PUBLISH_STRATEGY_SCHEDULED}:
             raise ValueError(f"不支持的发布策略: {self.publish_strategy}")
 
@@ -586,7 +653,7 @@ class TencentBaseUploader(BaseVideoUploader):
         # cookie 失效时前端 JS 会跳转到登录页, 提前发现并报明确的错误
         try:
             await page.wait_for_url("**/login.html**", timeout=8000)
-            raise RuntimeError("视频号 cookie 已失效（被跳转到登录页），请重新扫码登录后再发布")
+            raise RuntimeError(f"视频号登录态已失效（被跳转到登录页）。{_TENCENT_LOGIN_HINT}")
         except TimeoutError:
             pass  # 8 秒内未跳转, 正常
         except RuntimeError:
@@ -594,7 +661,7 @@ class TencentBaseUploader(BaseVideoUploader):
         except Exception:
             pass
         if any("open.weixin.qq.com/connect/qrconnect" in fr.url for fr in page.frames):
-            raise RuntimeError("视频号 cookie 已失效（被跳转到登录页），请重新扫码登录后再发布")
+            raise RuntimeError(f"视频号登录态已失效（被跳转到登录页）。{_TENCENT_LOGIN_HINT}")
         try:
             await page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
@@ -826,6 +893,7 @@ class TencentBaseUploader(BaseVideoUploader):
         deadline = time.monotonic() + timeout_seconds
         last_report = 0.0
         retries = 0
+        button_text = "保存草稿" if getattr(self, "is_draft", False) else "发表"
         while True:
             if time.monotonic() > deadline:
                 try:
@@ -835,10 +903,12 @@ class TencentBaseUploader(BaseVideoUploader):
                 except Exception:
                     pass
                 raise RuntimeError(
-                    f"视频号上传超过 {timeout_seconds} 秒仍未完成（「发表」按钮一直不可用）"
+                    f"视频号上传超过 {timeout_seconds} 秒仍未完成（「{button_text}」按钮一直不可用）"
                 )
             try:
-                publish_button = page.locator('div.form-btns button:has-text("发表"):visible').first
+                publish_button = page.locator(
+                    f'div.form-btns button:has-text("{button_text}"):visible'
+                ).first
                 if await publish_button.count():
                     button_class = await publish_button.get_attribute("class")
                     if (
@@ -879,6 +949,43 @@ class TencentBaseUploader(BaseVideoUploader):
             except Exception:
                 await asyncio.sleep(2)
 
+    async def _click_action_button(self, button) -> None:
+        try:
+            await button.click(timeout=4000)
+        except Exception:
+            await button.evaluate("el => el.click()")
+
+    async def _save_draft(self, page: Page, button) -> None:
+        """保存草稿。
+
+        视频号网页端保存草稿后不会跳转，只在 iframe 里发 ``post_draft`` 请求；
+        原来的 ``wait_for_url("**/post/list**")`` 永远等不到，导致 --draft 卡死。
+        """
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                async with page.expect_response(
+                    lambda response: "post_draft" in response.url,
+                    timeout=12_000,
+                ) as response_info:
+                    await self._click_action_button(button)
+                response = await response_info.value
+                if response.status >= 400:
+                    raise RuntimeError(f"草稿保存接口返回 HTTP {response.status}")
+                tencent_logger.success(_msg("🥳", "视频草稿保存成功"))
+                return
+            except Exception as exc:
+                last_error = exc
+                current_url = page.url
+                if "post/list" in current_url or "draft" in current_url:
+                    tencent_logger.success(_msg("🥳", "视频草稿保存成功"))
+                    return
+                tencent_logger.warning(
+                    _msg("😵", f"草稿保存未确认（第 {attempt + 1}/3 次）：{str(exc)[:80]}")
+                )
+                await asyncio.sleep(2)
+        raise RuntimeError(f"草稿保存未在预期时间内完成：{last_error}")
+
     async def submit_publish(self, page: Page) -> None:
         is_draft = getattr(self, "is_draft", False)
         # 先等待并清理遮罩/弹窗,再等发表按钮出现
@@ -898,36 +1005,28 @@ class TencentBaseUploader(BaseVideoUploader):
         else:
             tencent_logger.warning(_msg("😵", "60s 内未找到可见的发表/草稿按钮，尝试强制继续"))
         # 点发表/草稿
+        if is_draft:
+            await self._save_draft(page, publish_btn)
+            return
         for attempt in range(20):
             try:
                 if await publish_btn.count():
-                    try:
-                        await publish_btn.click(timeout=4000)
-                    except Exception:
-                        await publish_btn.evaluate("el => el.click()")
-                if is_draft:
-                    await page.wait_for_url("**/post/list**", timeout=5000)
-                    tencent_logger.success(_msg("🥳", "视频草稿保存成功"))
-                else:
-                    # 发表成功后视频号可能跳 /platform（首页）、/post/list 或留在 create 页但按钮消失。
-                    # 综合判断：URL 离开 /post/create 或 发表按钮不再存在。
-                    for _ in range(10):
-                        await asyncio.sleep(1)
-                        cur = page.url
-                        if "/post/create" not in cur:
-                            tencent_logger.success(_msg("🥳", "视频发布成功"))
-                            return
-                        if not await publish_btn.count():
-                            tencent_logger.success(_msg("🥳", "视频发布成功（按钮已消失）"))
-                            return
-                    raise Exception("发表后 10s 页面未变化")
-                return
+                    await self._click_action_button(publish_btn)
+                # 发表成功后视频号可能跳 /platform（首页）、/post/list 或留在 create 页但按钮消失。
+                # 综合判断：URL 离开 /post/create 或 发表按钮不再存在。
+                for _ in range(10):
+                    await asyncio.sleep(1)
+                    cur = page.url
+                    if "/post/create" not in cur:
+                        tencent_logger.success(_msg("🥳", "视频发布成功"))
+                        return
+                    if not await publish_btn.count():
+                        tencent_logger.success(_msg("🥳", "视频发布成功（按钮已消失）"))
+                        return
+                raise Exception("发表后 10s 页面未变化")
             except Exception as exc:
                 current_url = page.url
-                if is_draft and ("post/list" in current_url or "draft" in current_url):
-                    tencent_logger.success(_msg("🥳", "视频草稿保存成功"))
-                    return
-                if (not is_draft) and "/post/create" not in current_url:
+                if "/post/create" not in current_url:
                     tencent_logger.success(_msg("🥳", "视频发布成功"))
                     return
                 if attempt and attempt % 5 == 0:
@@ -954,7 +1053,7 @@ class TencentVideo(TencentBaseUploader):
         short_title: str | None = None,
         publish_strategy: str = TENCENT_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = DEBUG_MODE,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool = False,
         collection_name: str | None = None,
     ):
         super().__init__(
@@ -1108,8 +1207,7 @@ class TencentVideo(TencentBaseUploader):
         await self.validate_upload_args()
         tencent_logger.info(_msg("🥳", "上传前检查通过"))
 
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
-        context = await browser.new_context(storage_state=self.account_file)
+        context = await launch_local_chrome(playwright, "tencent", self.account_file)
 
         try:
             page = await context.new_page()
@@ -1130,11 +1228,10 @@ class TencentVideo(TencentBaseUploader):
             await self.set_short_title(page, self.title, self.short_title)
             await self.submit_publish(page)
 
-            await context.storage_state(path=self.account_file)
+            await export_storage_state(context, self.account_file)
             tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
-            await context.close()
-            await browser.close()
+            await close_browser_resources(context, None, timeout=15)
 
     async def tencent_upload_video(self):
         async with async_playwright() as playwright:
@@ -1155,7 +1252,7 @@ class TencentNote(TencentBaseUploader):
         title: str | None = None,
         publish_strategy: str = TENCENT_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = DEBUG_MODE,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool = False,
         is_draft: bool = False,
     ):
         super().__init__(
@@ -1214,9 +1311,7 @@ class TencentNote(TencentBaseUploader):
         await self.validate_upload_args()
         tencent_logger.info(_msg("🥳", "图文上传前检查通过"))
 
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
-        context = await browser.new_context(storage_state=self.account_file)
-        context = await set_init_script(context)
+        context = await launch_local_chrome(playwright, "tencent", self.account_file)
 
         try:
             page = await context.new_page()
@@ -1230,11 +1325,10 @@ class TencentNote(TencentBaseUploader):
 
             await self.submit_publish(page)
 
-            await context.storage_state(path=self.account_file)
+            await export_storage_state(context, self.account_file)
             tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
-            await context.close()
-            await browser.close()
+            await close_browser_resources(context, None, timeout=15)
 
     async def tencent_upload_note(self):
         async with async_playwright() as playwright:

@@ -142,7 +142,7 @@ class XiaohongshuUploaderTests(unittest.TestCase):
         self.assertIs(locator, qrcode_locator)
 
     def test_setup_returns_detail_when_cookie_invalid_without_handle(self):
-        with patch("uploader.xiaohongshu_uploader.main.os.path.exists", return_value=False):
+        with patch("uploader.xiaohongshu_uploader.main.has_local_session", return_value=False):
             result = asyncio.run(
                 xhs_main.xiaohongshu_setup(
                     "missing.json",
@@ -162,18 +162,17 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             "qrcode": {"image_path": "qrcode.png"},
             "current_url": "https://creator.xiaohongshu.com/",
         }
-        with patch("uploader.xiaohongshu_uploader.main.os.path.exists", return_value=False):
-            with patch(
-                "uploader.xiaohongshu_uploader.main.xiaohongshu_cookie_gen",
-                new=AsyncMock(return_value=login_result),
-            ) as mock_login:
-                result = asyncio.run(
-                    xhs_main.xiaohongshu_setup(
-                        "account.json",
-                        handle=True,
-                        return_detail=True,
-                    )
+        with patch(
+            "uploader.xiaohongshu_uploader.main.xiaohongshu_cookie_gen",
+            new=AsyncMock(return_value=login_result),
+        ) as mock_login:
+            result = asyncio.run(
+                xhs_main.xiaohongshu_setup(
+                    "account.json",
+                    handle=True,
+                    return_detail=True,
                 )
+            )
         self.assertTrue(result["success"])
         mock_login.assert_awaited_once()
 
@@ -195,11 +194,7 @@ class XiaohongshuUploaderTests(unittest.TestCase):
                 thumbnail_path=str(thumbnail_path),
             )
 
-            with patch(
-                "uploader.xiaohongshu_uploader.main.cookie_auth",
-                new=AsyncMock(return_value=True),
-            ):
-                asyncio.run(app.validate_upload_args())
+            asyncio.run(app.validate_upload_args())
 
         self.assertTrue(app.file_path.endswith("demo.mp4"))
         self.assertTrue(app.thumbnail_path.endswith("demo.png"))

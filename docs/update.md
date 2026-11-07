@@ -25,7 +25,9 @@ uv pip install -e .
 
 ### 3. 如有需要，更新浏览器依赖
 
-当前主线使用 `patchright`。
+抖音、小红书、视频号使用本机 Google Chrome；更新后确认 Chrome 仍可启动。Chrome 不在常规位置时检查 `conf.py` 的 `LOCAL_CHROME_PATH`。
+
+其余仍使用 `patchright` 的平台可更新 Chromium：
 
 Windows PowerShell：
 
@@ -79,7 +81,7 @@ git pull
 uv pip install -e .
 ```
 
-3. 如需浏览器驱动，更新 `patchright` Chromium
+3. 如需浏览器驱动：抖音、小红书、视频号确认本机 Google Chrome 可用；其他 patchright 平台更新 Chromium
 
 4. 重新验证 CLI：
 

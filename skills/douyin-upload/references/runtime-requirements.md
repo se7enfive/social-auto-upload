@@ -4,7 +4,7 @@
 
 - 已安装 `social-auto-upload`
 - 可以调用 `sau` 命令，或至少有等效调用方式
-- 已为 `patchright` 安装 Chromium
+- 已安装本机 Google Chrome（不是 Playwright 自带的 Chromium）
 
 ## 推荐安装方式
 
@@ -14,19 +14,21 @@
 uv pip install -e .
 ```
 
-## 安装 patchright 浏览器
+## 准备本机 Google Chrome
 
-Windows PowerShell：
+抖音的登录、校验和上传都通过本机 Chrome 的专用 profile 运行，必须使用可见浏览器窗口。
 
-```powershell
-$env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchright install chromium
-```
+- 默认使用系统安装的 Google Chrome。
+- 如果 Chrome 不在常规位置，在 `conf.py` 中设置 `LOCAL_CHROME_PATH` 为实际可执行文件路径。
+- 不需要为抖音执行 `patchright install chromium`；该命令仍供其他未迁移平台使用。
+- 专用 profile 默认保存在 `.local/chrome-profiles/douyin/`；同一账号的 profile 不能同时被两个进程打开。
 
-Linux / macOS（bash / zsh）：
+## 登录态与二维码
 
-```bash
-PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright" patchright install chromium
-```
+- 首次登录需要用户在打开的本机 Chrome 窗口中扫码或完成验证。
+- `cookies/douyin_<account>.json` 只作为首次导入和后续备份；日常以专用 Chrome profile 中的登录态为准。
+- 如果登录过程中已经生成了本地二维码图片，agent 应优先直接把图片展示/发送给用户扫码，不要只告诉用户图片路径。
+- 不要传 `--headless`；抖音命令会直接拒绝该参数。
 
 ## 常见调用方式
 
@@ -59,9 +61,9 @@ PowerShell：
 uv run sau douyin --help
 ```
 
-## 无头和有头模式
+## 可见窗口与账号隔离
 
-- 使用 `--headless` 表示无头模式
-- 使用 `--headed` 表示有头模式
-- 如果用户明确要求无头登录，也要预期 CLI 会通过控制台输出或临时图片路径提供二维码相关提示
-- 如果登录过程中已经生成了本地二维码图片，agent 应优先直接把图片展示/发送给用户扫码，不要只告诉用户图片路径
+- 抖音命令始终使用有头模式；`--headless` 会被拒绝，`--headed` 仅为兼容旧脚本保留。
+- 每个 `--account` 对应一个独立的本机 Chrome profile，互不共享登录态。
+- 同一 profile 同一时间只允许一个进程操作；遇到“profile 被占用”时先关闭该账号残留的自动化 Chrome，再重试。
+- 如果登录过程中已经生成了本地二维码图片，agent 应优先直接把图片展示/发送给用户扫码，不要只告诉用户图片路径。

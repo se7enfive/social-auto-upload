@@ -394,6 +394,15 @@ class CloseResourcesTests(unittest.IsolatedAsyncioTestCase):
         browser.close.assert_awaited_once()
         self.assertTrue(errors)
 
+    async def test_persistent_context_closes_without_browser(self):
+        context = MagicMock()
+        context.close = AsyncMock()
+
+        errors = await close_browser_resources(context, None, timeout=15)
+
+        context.close.assert_awaited_once()
+        self.assertEqual(errors, [])
+
 
 class RiskProbeTests(unittest.IsolatedAsyncioTestCase):
     def _page(self, url, visible):
@@ -496,6 +505,7 @@ def _fake_douyin_browser():
 
     text_locator = MagicMock()
     text_locator.first = text_locator
+    text_locator.count = AsyncMock(return_value=0)
     text_locator.is_visible = AsyncMock(return_value=False)
     text_locator.click = AsyncMock()
     page.get_by_text = MagicMock(return_value=text_locator)
@@ -506,16 +516,17 @@ def _fake_douyin_browser():
     button.click = AsyncMock()
     page.get_by_role = MagicMock(return_value=button)
 
+    async def fake_storage_state(path=None):
+        if path:
+            Path(path).write_text('{"cookies": [], "origins": []}', encoding="utf-8")
+
     context = MagicMock()
     context.new_page = AsyncMock(return_value=page)
     context.close = AsyncMock()
-    context.storage_state = AsyncMock()
-    browser = MagicMock()
-    browser.new_context = AsyncMock(return_value=context)
-    browser.close = AsyncMock()
+    context.storage_state = AsyncMock(side_effect=fake_storage_state)
     playwright = MagicMock()
-    playwright.chromium.launch = AsyncMock(return_value=browser)
-    return playwright, page, button
+    playwright.chromium.launch = AsyncMock(side_effect=AssertionError("不得使用 Chromium"))
+    return playwright, page, button, context
 
 
 def _fake_xhs_browser():
@@ -551,16 +562,17 @@ def _fake_xhs_browser():
     page.locator = MagicMock(side_effect=locator)
     page.wait_for_selector = AsyncMock(return_value=upload_input)
 
+    async def fake_storage_state(path=None):
+        if path:
+            Path(path).write_text('{"cookies": [], "origins": []}', encoding="utf-8")
+
     context = MagicMock()
     context.new_page = AsyncMock(return_value=page)
     context.close = AsyncMock()
-    context.storage_state = AsyncMock()
-    browser = MagicMock()
-    browser.new_context = AsyncMock(return_value=context)
-    browser.close = AsyncMock()
+    context.storage_state = AsyncMock(side_effect=fake_storage_state)
     playwright = MagicMock()
-    playwright.chromium.launch = AsyncMock(return_value=browser)
-    return playwright, page, button
+    playwright.chromium.launch = AsyncMock(side_effect=AssertionError("不得使用 Chromium"))
+    return playwright, page, button, context
 
 
 class UploaderSafetyIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -587,7 +599,7 @@ class UploaderSafetyIntegrationTests(unittest.IsolatedAsyncioTestCase):
         return attempt
 
     async def _run_douyin_video(self, prepare_only):
-        playwright, page, button = _fake_douyin_browser()
+        playwright, page, button, context = _fake_douyin_browser()
         attempt = self._attempt(prepare_only=prepare_only)
         video = douyin_main.DouYinVideo(
             "标题",
@@ -603,12 +615,16 @@ class UploaderSafetyIntegrationTests(unittest.IsolatedAsyncioTestCase):
         video.apply_collection = AsyncMock()
         video.set_thumbnail = AsyncMock()
         video.handle_auto_video_cover = AsyncMock(return_value=False)
+        launch = AsyncMock(return_value=context)
         with (
-            patch.object(douyin_main, "set_init_script", AsyncMock(side_effect=lambda ctx: ctx)),
+            patch.object(douyin_main, "launch_local_chrome", launch),
             patch.object(douyin_main, "_douyin_risk_reason", AsyncMock(return_value=None)),
             patch.object(douyin_main.asyncio, "sleep", AsyncMock()),
         ):
             await video.upload(playwright)
+        launch.assert_awaited_once()
+        playwright.chromium.launch.assert_not_called()
+        context.close.assert_awaited_once()
         return attempt, button
 
     async def test_douyin_video_prepare_only_never_clicks_publish(self):
@@ -622,7 +638,7 @@ class UploaderSafetyIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempt.status, STATUS_SUBMITTED)
 
     async def _run_douyin_note(self, prepare_only):
-        playwright, page, button = _fake_douyin_browser()
+        playwright, page, button, context = _fake_douyin_browser()
         attempt = self._attempt(prepare_only=prepare_only)
         note = douyin_main.DouYinNote(
             image_paths=[str(self.tmp / "1.png")],
@@ -635,12 +651,16 @@ class UploaderSafetyIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         note.validate_upload_args = AsyncMock()
         note.fill_title_and_description = AsyncMock()
+        launch = AsyncMock(return_value=context)
         with (
-            patch.object(douyin_main, "set_init_script", AsyncMock(side_effect=lambda ctx: ctx)),
+            patch.object(douyin_main, "launch_local_chrome", launch),
             patch.object(douyin_main, "_douyin_risk_reason", AsyncMock(return_value=None)),
             patch.object(douyin_main.asyncio, "sleep", AsyncMock()),
         ):
             await note.upload(playwright)
+        launch.assert_awaited_once()
+        playwright.chromium.launch.assert_not_called()
+        context.close.assert_awaited_once()
         return attempt, button
 
     async def test_douyin_note_prepare_only_never_clicks_publish(self):
@@ -654,7 +674,7 @@ class UploaderSafetyIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempt.status, STATUS_SUBMITTED)
 
     async def _run_xhs_video(self, prepare_only):
-        playwright, page, button = _fake_xhs_browser()
+        playwright, page, button, context = _fake_xhs_browser()
         attempt = self._attempt(platform="xiaohongshu", prepare_only=prepare_only)
         video = xhs_main.XiaoHongShuVideo(
             title="标题",
@@ -668,12 +688,16 @@ class UploaderSafetyIntegrationTests(unittest.IsolatedAsyncioTestCase):
         video.fill_meta = AsyncMock()
         video.set_thumbnail = AsyncMock()
         video.check_original_declaration = AsyncMock()
+        launch = AsyncMock(return_value=context)
         with (
-            patch.object(xhs_main, "set_init_script", AsyncMock(side_effect=lambda ctx: ctx)),
+            patch.object(xhs_main, "launch_local_chrome", launch),
             patch.object(xhs_main, "_xhs_risk_reason", AsyncMock(return_value=None)),
             patch.object(xhs_main.asyncio, "sleep", AsyncMock()),
         ):
             await video.upload(playwright)
+        launch.assert_awaited_once()
+        playwright.chromium.launch.assert_not_called()
+        context.close.assert_awaited_once()
         return attempt, button
 
     async def test_xhs_video_prepare_only_never_clicks_publish(self):
@@ -687,7 +711,7 @@ class UploaderSafetyIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempt.status, STATUS_SUBMITTED)
 
     async def _run_xhs_note(self, prepare_only):
-        playwright, page, button = _fake_xhs_browser()
+        playwright, page, button, context = _fake_xhs_browser()
         attempt = self._attempt(platform="xiaohongshu", prepare_only=prepare_only)
         note = xhs_main.XiaoHongShuNote(
             image_paths=[str(self.tmp / "1.png")],
@@ -701,12 +725,16 @@ class UploaderSafetyIntegrationTests(unittest.IsolatedAsyncioTestCase):
         note.validate_upload_args = AsyncMock()
         note.fill_meta = AsyncMock()
         note.check_original_declaration = AsyncMock()
+        launch = AsyncMock(return_value=context)
         with (
-            patch.object(xhs_main, "set_init_script", AsyncMock(side_effect=lambda ctx: ctx)),
+            patch.object(xhs_main, "launch_local_chrome", launch),
             patch.object(xhs_main, "_xhs_risk_reason", AsyncMock(return_value=None)),
             patch.object(xhs_main.asyncio, "sleep", AsyncMock()),
         ):
             await note.upload(playwright)
+        launch.assert_awaited_once()
+        playwright.chromium.launch.assert_not_called()
+        context.close.assert_awaited_once()
         return attempt, button
 
     async def test_xhs_note_prepare_only_never_clicks_publish(self):
@@ -720,7 +748,7 @@ class UploaderSafetyIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempt.status, STATUS_SUBMITTED)
 
     async def test_submit_timeout_stays_unknown_when_screenshot_fails(self):
-        playwright, page, button = _fake_douyin_browser()
+        playwright, page, button, context = _fake_douyin_browser()
 
         async def wait_for_url(url, timeout=None, **kwargs):
             if "content/manage" in str(url):
@@ -744,14 +772,18 @@ class UploaderSafetyIntegrationTests(unittest.IsolatedAsyncioTestCase):
         video.apply_collection = AsyncMock()
         video.set_thumbnail = AsyncMock()
         video.handle_auto_video_cover = AsyncMock(return_value=False)
+        launch = AsyncMock(return_value=context)
         with (
-            patch.object(douyin_main, "set_init_script", AsyncMock(side_effect=lambda ctx: ctx)),
+            patch.object(douyin_main, "launch_local_chrome", launch),
             patch.object(douyin_main, "_douyin_risk_reason", AsyncMock(return_value=None)),
             patch.object(douyin_main.asyncio, "sleep", AsyncMock()),
             self.assertRaises(PublishOutcomeUnknown),
         ):
             await video.upload(playwright)
 
+        launch.assert_awaited_once()
+        playwright.chromium.launch.assert_not_called()
+        context.close.assert_awaited_once()
         self.assertEqual(button.click.await_count, 1)
         self.assertEqual(attempt.status, STATUS_SUBMISSION_UNKNOWN)
         page.screenshot.assert_awaited_once()

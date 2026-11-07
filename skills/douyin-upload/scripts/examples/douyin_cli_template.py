@@ -12,10 +12,10 @@ def run_command(command: list[str]) -> None:
 def main() -> None:
     account = "account_a"
     # account_name is user-defined. One account_name maps to one account file.
-    # You can prepare multiple account names and run them in parallel.
+    # Douyin always launches a visible local Google Chrome window; --headless is rejected.
 
     commands = [
-        ["sau", "douyin", "login", "--account", account, "--headless"],
+        ["sau", "douyin", "login", "--account", account],
         ["sau", "douyin", "check", "--account", account],
         [
             "sau",
@@ -33,7 +33,6 @@ def main() -> None:
             "cli,video",
             "--thumbnail",
             "videos/demo.png",
-            "--headless",
         ],
         [
             "sau",
@@ -50,7 +49,6 @@ def main() -> None:
             "Douyin note from Python",
             "--tags",
             "cli,note",
-            "--headless",
         ],
     ]
 

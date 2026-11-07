@@ -18,6 +18,7 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
+from utils.publish_safety import session_lock
 
 
 def register(platform_parsers):
@@ -30,7 +31,7 @@ def register(platform_parsers):
         action_parser = tencent_actions.add_parser(action_name, help=f"Tencent/WeChat Channels {action_name}")
         action_parser.add_argument("--account", required=True, help="Tencent user-defined account_name")
         if action_name == "login":
-            add_runtime_flags(action_parser)
+            add_runtime_flags(action_parser, default_headless=False, allow_headless=False)
 
     tencent_upload_video_parser = tencent_actions.add_parser("upload-video", help="Upload one video to WeChat Channels")
     tencent_upload_video_parser.add_argument("--account", required=True, help="Tencent user-defined account_name")
@@ -46,7 +47,7 @@ def register(platform_parsers):
     tencent_upload_video_parser.add_argument("--category", help="Optional original content category")
     tencent_upload_video_parser.add_argument("--draft", action="store_true", help="Save as draft instead of publishing")
     tencent_upload_video_parser.add_argument("--collection", default=None, help="Optional collection name to add the work into (must already exist)")
-    add_runtime_flags(tencent_upload_video_parser)
+    add_runtime_flags(tencent_upload_video_parser, default_headless=False, allow_headless=False)
 
 
 @dataclass(slots=True)
@@ -65,54 +66,55 @@ class TencentVideoUploadRequest:
     is_draft: bool = False
     publish_strategy: str = TENCENT_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool = False
     collection_name: str | None = None
 
 
-async def login_tencent_account(account_name: str, headless: bool = True) -> dict:
+async def login_tencent_account(account_name: str, headless: bool = False) -> dict:
     account_file = resolve_account_file("tencent", account_name)
-    return await tencent_setup(str(account_file), handle=True, return_detail=True, headless=headless)
+    with session_lock(account_file, "tencent", account_name):
+        return await tencent_setup(str(account_file), handle=True, return_detail=True, headless=headless)
 
 
 async def check_tencent_account(account_name: str) -> bool:
     account_file = resolve_account_file("tencent", account_name)
-    if not account_file.exists():
-        return False
-    return await tencent_cookie_auth(str(account_file))
+    with session_lock(account_file, "tencent", account_name):
+        return await tencent_cookie_auth(str(account_file))
 
 
 async def upload_tencent_video(request: TencentVideoUploadRequest) -> Path:
     account_file = resolve_account_file("tencent", request.account_name)
-    is_ready = await tencent_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"Tencent/WeChat Channels cookie is missing or expired: {account_file}. "
-            f"Run `sau tencent login --account {request.account_name}` first."
-        )
+    with session_lock(account_file, "tencent", request.account_name):
+        is_ready = await tencent_setup(str(account_file), handle=False)
+        if not is_ready:
+            raise RuntimeError(
+                f"Tencent/WeChat Channels cookie is missing or expired: {account_file}. "
+                f"Run `sau tencent login --account {request.account_name}` first."
+            )
 
-    app = TencentVideo(
-        title=request.title,
-        file_path=str(request.video_file),
-        tags=request.tags,
-        publish_date=request.publish_date,
-        account_file=str(account_file),
-        category=request.category,
-        is_draft=request.is_draft,
-        desc=request.description,
-        thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
-        thumbnail_landscape_path=(
-            str(request.thumbnail_landscape_file) if request.thumbnail_landscape_file else None
-        ),
-        thumbnail_portrait_path=(
-            str(request.thumbnail_portrait_file) if request.thumbnail_portrait_file else None
-        ),
-        short_title=request.short_title,
-        publish_strategy=request.publish_strategy,
-        debug=request.debug,
-        headless=request.headless,
-        collection_name=request.collection_name,
-    )
-    await app.tencent_upload_video()
+        app = TencentVideo(
+            title=request.title,
+            file_path=str(request.video_file),
+            tags=request.tags,
+            publish_date=request.publish_date,
+            account_file=str(account_file),
+            category=request.category,
+            is_draft=request.is_draft,
+            desc=request.description,
+            thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
+            thumbnail_landscape_path=(
+                str(request.thumbnail_landscape_file) if request.thumbnail_landscape_file else None
+            ),
+            thumbnail_portrait_path=(
+                str(request.thumbnail_portrait_file) if request.thumbnail_portrait_file else None
+            ),
+            short_title=request.short_title,
+            publish_strategy=request.publish_strategy,
+            debug=request.debug,
+            headless=request.headless,
+            collection_name=request.collection_name,
+        )
+        await app.tencent_upload_video()
     return account_file
 
 

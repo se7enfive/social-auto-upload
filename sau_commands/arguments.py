@@ -104,9 +104,44 @@ def publish_safety_options(args: argparse.Namespace) -> dict:
     }
 
 
-def add_runtime_flags(parser: argparse.ArgumentParser) -> None:
+class _HeadlessUnsupportedAction(argparse.Action):
+    """在参数解析阶段拒绝 --headless，避免启动无头 Chromium。
+
+    抖音、小红书、视频号只允许本机 Chrome 有头模式；直接 parser.error()
+    会在启动任何浏览器之前以退出码 2 结束。
+    """
+
+    def __init__(self, option_strings, dest, **kwargs):
+        super().__init__(option_strings, dest, nargs=0, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        parser.error(
+            f"{option_string} is not supported for this command: "
+            "it always launches a visible local Google Chrome window."
+        )
+
+
+def add_runtime_flags(
+    parser: argparse.ArgumentParser,
+    *,
+    default_headless: bool = True,
+    allow_headless: bool = True,
+) -> None:
+    """添加 --debug/--headed/--headless。
+
+    allow_headless=False 时仍保留 --headless（便于给出明确错误），但解析即失败；
+    默认值由 default_headless 决定。
+    """
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     headless_group = parser.add_mutually_exclusive_group()
     headless_group.add_argument("--headed", dest="headless", action="store_false", help="Run with browser UI")
-    headless_group.add_argument("--headless", dest="headless", action="store_true", help="Run in headless mode")
-    parser.set_defaults(headless=True)
+    if allow_headless:
+        headless_group.add_argument("--headless", dest="headless", action="store_true", help="Run in headless mode")
+    else:
+        headless_group.add_argument(
+            "--headless",
+            dest="headless",
+            action=_HeadlessUnsupportedAction,
+            help="Not supported: this command always launches a visible local Chrome window",
+        )
+    parser.set_defaults(headless=default_headless)

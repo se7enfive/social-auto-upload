@@ -2,9 +2,12 @@ import sau_commands.douyin
 import sau_commands.tencent
 import sau_commands.xiaohongshu
 import asyncio
+import io
+import os
 import tempfile
 import unittest
 from argparse import Namespace
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -157,7 +160,7 @@ class BrowserCliParserTests(unittest.TestCase):
         self.assertEqual(args.title, "图文标题")
         self.assertEqual(args.note, "图文正文")
 
-    def test_xiaohongshu_upload_video_defaults_to_headless(self):
+    def test_xiaohongshu_upload_video_defaults_to_headed(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             video_path = Path(tmp_dir) / "demo.mp4"
             video_path.write_bytes(b"video")
@@ -176,7 +179,70 @@ class BrowserCliParserTests(unittest.TestCase):
                 ]
             )
 
+        self.assertFalse(args.headless)
+
+    def test_local_chrome_platforms_reject_explicit_headless(self):
+        parser = sau_cli.build_parser()
+        commands = [
+            ["douyin", "login", "--account", "creator"],
+            ["xiaohongshu", "login", "--account", "creator"],
+            ["tencent", "login", "--account", "creator"],
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                stderr = io.StringIO()
+                with redirect_stderr(stderr), self.assertRaises(SystemExit) as caught:
+                    parser.parse_args(command + ["--headless"])
+                self.assertEqual(caught.exception.code, 2)
+                self.assertIn("visible local Google Chrome", stderr.getvalue())
+
+    def test_local_chrome_platforms_accept_headed(self):
+        parser = sau_cli.build_parser()
+        for platform in ("douyin", "xiaohongshu", "tencent"):
+            with self.subTest(platform=platform):
+                args = parser.parse_args([platform, "login", "--account", "creator", "--headed"])
+                self.assertFalse(args.headless)
+
+    def test_other_platforms_keep_headless_default(self):
+        parser = sau_cli.build_parser()
+        args = parser.parse_args(["kuaishou", "login", "--account", "creator"])
         self.assertTrue(args.headless)
+
+    def test_local_chrome_platforms_default_to_headed(self):
+        parser = sau_cli.build_parser()
+        for platform in ("douyin", "xiaohongshu", "tencent"):
+            with self.subTest(platform=platform):
+                args = parser.parse_args([platform, "login", "--account", "creator"])
+                self.assertFalse(args.headless)
+
+
+class BrowserCliCheckTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self._env = patch.dict(os.environ, {"SAU_STATE_DIR": str(self.tmp / "state")})
+        self._env.start()
+        self.account_file = self.tmp / "cookies" / "account.json"
+
+    def tearDown(self):
+        self._env.stop()
+        self._tmp.cleanup()
+
+    def test_check_uses_profile_even_without_account_json(self):
+        self.assertFalse(self.account_file.exists())
+        cases = (
+            (sau_commands.douyin, "check_douyin_account", "douyin_cookie_auth"),
+            (sau_commands.xiaohongshu, "check_xiaohongshu_account", "xiaohongshu_cookie_auth"),
+            (sau_commands.tencent, "check_tencent_account", "tencent_cookie_auth"),
+        )
+        for module, check_name, auth_name in cases:
+            with self.subTest(platform=module.__name__):
+                with (
+                    patch.object(module, "resolve_account_file", return_value=self.account_file),
+                    patch.object(module, auth_name, new=AsyncMock(return_value=True)) as auth,
+                ):
+                    self.assertTrue(asyncio.run(getattr(module, check_name)("creator")))
+                auth.assert_awaited_once()
 
     def test_xiaohongshu_upload_note_accepts_headed(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -242,7 +308,7 @@ class BrowserCliDispatchTests(unittest.TestCase):
             tags="测试,图文",
             schedule=0,
             debug=False,
-            headless=True,
+            headless=False,
         )
         with patch("sau_commands.douyin.upload_note", new=AsyncMock()) as mock_upload:
             asyncio.run(sau_cli.dispatch(args))
@@ -269,7 +335,7 @@ class BrowserCliDispatchTests(unittest.TestCase):
             declaration="已确认声明原文",
             collection=None,
             debug=False,
-            headless=True,
+            headless=False,
         )
         with patch("sau_commands.douyin.upload_video", new=AsyncMock()) as mock_upload:
             asyncio.run(sau_cli.dispatch(args))
@@ -297,7 +363,7 @@ class BrowserCliDispatchTests(unittest.TestCase):
             collection=None,
             draft=False,
             debug=False,
-            headless=True,
+            headless=False,
         )
         with patch("sau_commands.tencent.upload_tencent_video", new=AsyncMock()) as mock_upload:
             asyncio.run(sau_cli.dispatch(args))
@@ -328,7 +394,7 @@ class BrowserCliDispatchTests(unittest.TestCase):
         self.assertEqual(request.description, "视频简介")
         self.assertFalse(request.headless)
 
-    def test_dispatch_xiaohongshu_upload_note_uses_headless_request(self):
+    def test_dispatch_xiaohongshu_upload_note_uses_headed_request(self):
         args = Namespace(
             platform="xiaohongshu",
             action="upload-note",
@@ -339,7 +405,7 @@ class BrowserCliDispatchTests(unittest.TestCase):
             tags="测试,图文",
             schedule=0,
             debug=False,
-            headless=True,
+            headless=False,
         )
         with patch("sau_commands.xiaohongshu.upload_xiaohongshu_note", new=AsyncMock()) as mock_upload:
             asyncio.run(sau_cli.dispatch(args))
@@ -347,7 +413,7 @@ class BrowserCliDispatchTests(unittest.TestCase):
         request = mock_upload.await_args.args[0]
         self.assertEqual(request.title, "图文标题")
         self.assertEqual(request.note, "图文正文")
-        self.assertTrue(request.headless)
+        self.assertFalse(request.headless)
         self.assertEqual(len(request.image_files), 2)
 
 

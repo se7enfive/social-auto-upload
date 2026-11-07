@@ -20,7 +20,7 @@ summary: 使用 sau 登录小红书并发布视频或图文。
 
 | 功能 | 命令入口 | 说明 |
 | --- | --- | --- |
-| 小红书登录 | `sau xiaohongshu login --account <name>` | 生成或刷新指定账号的 cookie |
+| 小红书登录 | `sau xiaohongshu login --account <name>` | 在专用本机 Chrome profile 中登录，并导出 cookie 备份 |
 | cookie 校验 | `sau xiaohongshu check --account <name>` | 检查指定账号 cookie 是否有效 |
 | 视频上传 | `sau xiaohongshu upload-video ...` | 上传并发布小红书视频 |
 | 图文上传 | `sau xiaohongshu upload-note ...` | 上传并发布小红书图文 |
@@ -29,6 +29,16 @@ summary: 使用 sau 登录小红书并发布视频或图文。
 
 - 视频使用 `title + desc + tags`
 - 图文使用 `title + note + tags`
+
+## 本机 Chrome 运行形态
+
+- 登录、校验、上传全过程都在**本机 Google Chrome 的可见窗口**中完成；小红书命令默认有头，显式传 `--headless` 会被 argparse 直接拒绝。
+- 每个 `--account` 使用独立的专用 Chrome profile，默认位于 `.local/chrome-profiles/xiaohongshu/`（可用 `SAU_STATE_DIR` 或 `conf.LOCAL_CHROME_PROFILE_ROOT` 改写）。不同账号的 profile 相互隔离。
+- 已有的 `cookies/xiaohongshu_<account>.json` 只在首次导入 profile 和之后导出备份时使用；登录后以专用 profile 中的登录态为准。
+- 同一账号 profile 同一时间只能被一个进程使用。启动前先结束同账号的其他自动化 Chrome 窗口；否则命令会提示 profile 被占用。
+- 用户明确要求无头模式时，说明该平台已不支持无头，不能传 `--headless`，也不要改用 Playwright Chromium 绕过。
+- 首次登录或二维码失效时，需要用户在打开的本机 Chrome 窗口中扫码或完成验证。
+- 海外环境如需 RedNote 域名，按 CLI 文档设置 `SAU_XHS_CREATOR_BASE_URL`。
 
 ## 默认工作流
 
@@ -43,8 +53,8 @@ summary: 使用 sau 登录小红书并发布视频或图文。
 
 ## 支持动作
 
-- 使用 `sau xiaohongshu login --account <name>` 登录小红书
-- 使用 `sau xiaohongshu check --account <name>` 校验 cookie 是否有效
+- 使用 `sau xiaohongshu login --account <name>` 在专用本机 Chrome profile 中登录小红书
+- 使用 `sau xiaohongshu check --account <name>` 校验本机 Chrome 登录态是否有效
 - 使用 `sau xiaohongshu upload-video ...` 上传小红书视频
 - 使用 `sau xiaohongshu upload-note ...` 上传小红书图文
 - 使用 `sau safety status --platform xiaohongshu --account <name>` 查看本地未解决记录
@@ -52,7 +62,7 @@ summary: 使用 sau 登录小红书并发布视频或图文。
 
 ## 命令选择建议
 
-- 当用户需要新的 cookie，或现有 cookie 已失效时，使用 `login`
+- 当用户需要新的登录态，或现有登录态已失效时，使用 `login`
 - 当用户只需要确认 cookie 状态时，使用 `check`
 - 当用户要发布视频时，使用 `upload-video`
 - 当用户要发布图文时，使用 `upload-note`
@@ -69,9 +79,10 @@ summary: 使用 sau 登录小红书并发布视频或图文。
 
 ## 执行前检查
 
-- 先确认当前 shell 里是否可以调用 `sau`
+- 先确认当前 shell 里是否可以调用 `sau`，且本机已安装 Google Chrome（必要时在 `conf.py` 设置 `LOCAL_CHROME_PATH`）
 - 如果 `sau` 不可用，按 `references/runtime-requirements.md` 里的回退方式处理
-- 当用户明确指定无头或有头模式时，显式传 `--headless` 或 `--headed`
+- 不要传 `--headless`；登录、校验和发布都会打开可见的本机 Chrome 窗口
+- `--headed` 仅为兼容旧脚本保留，传入不会改变行为
 - 只有用户明确要求定时发布时，才使用 `--schedule`
 - 非交互场景建议传 `--request-id` 和 `--result`，便于幂等判断和事后核对
 - 如果登录流程生成了本地二维码图片，不要只把图片路径告诉用户
