@@ -124,7 +124,7 @@ HTTP 引擎的硬性要求：
 - `--product-link` / `--product-title`：不支持商品。
 - `--collection`：不支持合集。
 
-预检发生在发布记录创建之后、worker 启动之前，因此失败仍会导出 `--result`，状态为 `failed_before_submit`，不会上传任何内容。
+预检发生在发布记录创建之后、worker 启动之前，因此失败仍会导出 `--result`，状态为 `failed_before_submit`，不会上传任何内容。引擎选择阶段的冲突（例如非 `public` 可见范围与浏览器专属选项同时出现）会在创建记录前直接报错，不产生 `--result`。
 
 ### 引擎选择
 
