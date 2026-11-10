@@ -34,6 +34,7 @@ STATUS_PREPARED = "prepared"
 STATUS_SUBMISSION_UNKNOWN = "submission_unknown"
 STATUS_SUBMITTED = "submitted"
 STATUS_NEEDS_HUMAN = "needs_human"
+STATUS_SUBMIT_REJECTED = "submit_rejected"
 STATUS_FAILED_BEFORE_SUBMIT = "failed_before_submit"
 STATUS_NOT_SUBMITTED = "not_submitted"
 
@@ -44,6 +45,7 @@ TERMINAL_STATUSES = frozenset(
         STATUS_SUBMITTED,
         STATUS_SUBMISSION_UNKNOWN,
         STATUS_NEEDS_HUMAN,
+        STATUS_SUBMIT_REJECTED,
         STATUS_NOT_SUBMITTED,
     }
 )
@@ -86,6 +88,10 @@ class PublishOutcomeUnknown(PublishSafetyError):
 
 class PublishNeedsHuman(PublishSafetyError):
     """需要人工完成验证或核对，未点击最终发表。"""
+
+
+class PublishRejected(PublishSafetyError):
+    """平台明确拒绝了提交，可以安全修正后重试。"""
 
 
 def _now() -> str:
@@ -425,6 +431,7 @@ class PublicationAttempt:
     preparing -> submitting -> submitted / submission_unknown
     preparing -> needs_human（点击前明确验证/风险）
     preparing -> failed_before_submit（点击前失败，可安全重试）
+    submitting -> submit_rejected（平台明确拒绝，终态、非阻塞）
     """
 
     def __init__(
@@ -584,6 +591,15 @@ class PublicationAttempt:
         self.reason = str(reason)
         self._write_best_effort()
 
+    def mark_submit_rejected(self, reason: str, evidence: dict | None = None) -> None:
+        """平台明确拒绝提交；终态但不阻塞，修正后可换 request-id 重试。"""
+        if evidence:
+            self.evidence.update(evidence)
+        self.status = STATUS_SUBMIT_REJECTED
+        self.submit_attempted = True
+        self.reason = str(reason)
+        self._write_best_effort()
+
     def mark_failed_before_submit(self, reason: str) -> None:
         if self.submit_attempted:
             return
@@ -662,6 +678,14 @@ async def submit_once(
     except asyncio.CancelledError:
         if safety is not None:
             safety.mark_unknown("等待提交结果期间任务被取消，结果未知")
+        raise
+    except PublishNeedsHuman as exc:
+        if safety is not None:
+            safety.mark_needs_human(str(exc), evidence)
+        raise
+    except PublishRejected as exc:
+        if safety is not None:
+            safety.mark_submit_rejected(str(exc), evidence)
         raise
     except Exception as exc:
         risk_reason = None

@@ -78,7 +78,7 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 
 | 平台 | 登录/账号准备 | 视频 | 文章 | 图文 | 定时发布 | CLI | Skill | 说明 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 抖音 | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 视频与图文发布 |
+| 抖音 | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 视频与图文发布；视频可选[纯 HTTP 引擎](./docs/douyin-http.md)（第三方运行时） |
 | Bilibili | ✅ | ✅ | - | - | ✅ | ✅ | ✅ | 视频发布；运行时自动准备 `biliup` |
 | 小红书（浏览器版） | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 视频与图文发布 |
 | 快手 | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 视频与图文发布 |
@@ -98,7 +98,7 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 
 `✅` 表示支持，`-` 表示不适用或未提供；`开发中`、`实验性` 不计入稳定能力。文章正文可以包含图片，与独立图文发布分列。
 
-> 抖音、小红书、视频号的登录、校验和发布使用**本机 Google Chrome** 的专用 profile，全程打开可见窗口，不接受 `--headless`；其他平台仍使用各自原有浏览器方式。详见 [CLI 使用说明](./docs/CLI.md#准备浏览器)。
+> 抖音、小红书、视频号的登录、校验和发布默认使用**本机 Google Chrome** 的专用 profile，全程打开可见窗口，不接受 `--headless`；其他平台仍使用各自原有浏览器方式。抖音视频另有一条可选的纯 HTTP 引擎，基于外部 `DouYin_Spider` 运行时（第三方代码、无 LICENSE，需 `sau douyin setup --accept-third-party`），不启动浏览器；详见 [抖音 HTTP 发布引擎](./docs/douyin-http.md)。
 
 ### 按内容形态
 
@@ -199,6 +199,18 @@ sau zhihu upload-video --account <account_name> --file videos/demo.mp4 --title "
 sau facebook upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags Facebook,测试
 sau facebook-page upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --page "我的 Page"
 ```
+
+抖音视频还可以绕过浏览器，使用 HTTP 引擎直接发布：
+
+```bash
+sau douyin setup --accept-third-party
+sau douyin login --account <account_name> --engine http
+sau douyin upload-video --account <account_name> --file videos/demo.mp4 \
+  --title "示例标题" --desc "示例简介" --tags tag1,tag2 \
+  --thumbnail cover.jpg --engine http --skip-ai-declaration
+```
+
+HTTP 引擎使用第三方 `DouYin_Spider` 运行时（无 LICENSE，安装需确认），不支持草稿、AI 声明、商品和合集，必须显式传 `--skip-ai-declaration`。详见[抖音 HTTP 发布引擎](./docs/douyin-http.md)。
 
 #### 文章
 

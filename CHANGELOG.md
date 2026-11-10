@@ -53,6 +53,16 @@
 - 明确当前保护层和节奏限制只覆盖 `sau` CLI 路径，Web 控制台路径（`sau_backend.py` → `myUtils/postVideo.py`）尚未接入。
 - 机制说明、恢复流程和许可边界见 [docs/publish-safety.md](./docs/publish-safety.md)。
 
+### 抖音 HTTP 发布引擎（可选，待真实账号验收）
+
+- 新增可选 HTTP 发布链路：`sau douyin setup --accept-third-party` 安装固定 commit 的第三方 `DouYin_Spider` 到用户目录，`login/check/upload-video` 支持 `--engine auto|browser|http`。
+- 第三方代码不复制进仓库；运行时使用独立 venv、临时 cwd、清理 `PYTHONPATH`/`VIRTUAL_ENV`/`DY_*`，凭据不进 argv、日志或 `--result`。
+- HTTP 登录使用扫码票据，凭据保存为 `cookies/douyin_http_<account>.json`；`check` 校验读链路，不保证 bd-ticket 服务端有效性。
+- 发布通过 worker 拦截 `create_v2` 完成提交握手，复用 `submit_once`；新增非阻塞终态 `submit_rejected`，区分平台明确拒绝与结果未知。
+- HTTP 不支持草稿、AI 声明、商品和合集；必须提供封面并显式传 `--skip-ai-declaration`，失败不重试、不回退浏览器。
+- 新增 `http_runtime.py`、`http_worker.py`、`http_engine.py` 及四个测试模块；说明见 [docs/douyin-http.md](./docs/douyin-http.md)。
+- 真实扫码登录、私有视频冒烟和正式发布仍需单独授权与人工核对。
+
 ## 发布流程
 
 1. 在 `Unreleased` 中记录用户可感知的变更和验证结果。

@@ -4,12 +4,14 @@
 
 ## 目标与范围
 
-第一期只覆盖抖音和小红书的四条路径：
+当前覆盖抖音和小红书的以下发布路径：
 
-- 抖音视频 `sau douyin upload-video`
+- 抖音视频 `sau douyin upload-video`（浏览器引擎；可选 HTTP 引擎）
 - 抖音图文 `sau douyin upload-note`
 - 小红书视频 `sau xiaohongshu upload-video`
 - 小红书图文 `sau xiaohongshu upload-note`
+
+抖音 HTTP 引擎复用同一套会话锁、journal、单次提交和节奏限制，只是把“点击浏览器按钮”换成“向外部 worker 发送一次 `submit` 命令”。详见 [抖音 HTTP 发布引擎](./douyin-http.md)。
 
 目标是降低四类风险：
 
@@ -112,21 +114,35 @@ Agent 工作流中，准备与正式提交应使用不同但可关联的 `--requ
 
 ### 10. 发布节奏（可选）
 
-独立的 `utils/publish_pacing.py` 提供可选的发布间隔、滚动 24 小时提交上限和风险后冷却，默认关闭。它复用本 journal 的 `submit_attempted_at`，判定发生在 `ensure_can_start()` 之后、创建新记录和启动浏览器之前；`--prepare-only` 不受限制。该模块只做确定性运营限制，不做拟人化、随机化或反检测。配置、规则和上游同步方式见 [发布节奏与账号冷却](./publish-pacing.md)。
+独立的 `utils/publish_pacing.py` 提供可选的发布间隔、滚动 24 小时提交上限和风险后冷却，默认关闭。它复用本 journal 的 `submit_attempted_at`，判定发生在 `ensure_can_start()` 之后、创建新记录和启动浏览器或 HTTP worker 之前；`--prepare-only` 不受限制。该模块只做确定性运营限制，不做拟人化、随机化或反检测。配置、规则和上游同步方式见 [发布节奏与账号冷却](./publish-pacing.md)。
+
+### 11. HTTP 引擎的提交映射
+
+抖音 HTTP 引擎不通过页面判断结果，而是拦截外部 worker 的 `create_v2` 请求：
+
+- worker 在发送请求前先握手，父进程写入提交意图后才回传 `submit`。
+- 成功响应且带 `item_id` → `submitted`。
+- 平台明确拒绝（JSON `status_code != 0`，或非 JSON 4xx）→ `submit_rejected`。这是终态但**不阻塞**，同一 request-id 在内容不变时可重试。
+- 响应头出现二次验证，或 worker 报告 `needs_human` → `needs_human`。
+- 请求已发出但未收到响应、worker 死亡、EOF 或观察超时 → `submission_unknown`。
+- 请求尚未发出（上传、CSRF、封面等前置步骤失败）→ `failed_before_submit`。
+
+HTTP 引擎不重试、不自动回退浏览器；失败后需要人工判断。
 
 ## 状态机
 
 ```text
-preparing ──> prepared                 （--prepare-only）
+preparing ──> prepared                 （--prepare-only，仅浏览器）
     │
     ├──> failed_before_submit          （点击前失败，可重试）
     ├──> needs_human                   （点击前验证/风险）
     └──> submission_unknown            （提交意图已落盘）
-             ├──> submitted            （页面成功证据）
+             ├──> submitted            （成功证据）
+             ├──> submit_rejected      （平台明确拒绝，非阻塞）
              └──> submission_unknown   （点击异常/取消/超时/风险）
 ```
 
-`submission_unknown` 和 `needs_human` 是阻塞状态。存在未解决记录时，该账号后续自动发布会失败；换 `--request-id` 不能绕过。
+`submission_unknown` 和 `needs_human` 是阻塞状态。存在未解决记录时，该账号后续自动发布会失败；换 `--request-id` 不能绕过。`submit_rejected` 和 `not_submitted` 不阻塞。
 
 ## 恢复流程
 
@@ -151,10 +167,14 @@ sau safety resolve \
 | 场景 | 状态 |
 | --- | --- |
 | cookie 缺失/失效、参数校验失败、上传失败 | `failed_before_submit` |
+| HTTP 运行时/凭据/选项预检失败，worker 提交前失败 | `failed_before_submit` |
 | 点击前检测到验证/风险 | `needs_human` |
+| HTTP 响应头出现二次验证 | `needs_human` |
+| 平台明确拒绝提交（HTTP `create_v2` 返回非零 `status_code` 或非 JSON 4xx） | `submit_rejected` |
 | 提交意图写入失败 | 不点击；按点击前失败处理 |
 | 点击抛出异常、任务取消、观察超时 | `submission_unknown` |
-| 页面出现成功跳转 | `submitted` |
+| HTTP 请求已发出但 worker 死亡、EOF 或超时 | `submission_unknown` |
+| 页面出现成功跳转，或 HTTP 返回 `item_id` | `submitted` |
 | 写回 cookie、导出结果、截图或清理失败 | 不改变已有提交状态 |
 
 截图只在 `--debug` 且结果未知时尽力保存到 journal 目录的 `screenshots/` 下；截图失败被忽略。
@@ -165,6 +185,8 @@ sau safety resolve \
 - 仓库内其他历史直连脚本（例如直接实例化上传器的示例）也不在这把锁的保护范围内。
 - 锁按本地账号文件路径隔离，不识别指向同一远端账号的不同别名；不做远端身份去重。
 - 抖音、小红书、视频号的专用 Chrome profile 由 `utils/local_chrome.py` 管理，journal 不保存 profile 内容或其中的 cookie。删除 profile 不是本保护层的恢复动作；需要重新登录时使用各平台 `login`。
+- 抖音 HTTP 引擎依赖固定 commit 的第三方 `DouYin_Spider`。平台私有接口改版可能导致 `create_v2` 失效；manifest 哈希与 self-test 会让不一致或依赖损坏快速暴露，但不会自动升级第三方代码。
+- HTTP 引擎没有草稿和 AI 声明能力；`--prepare-only`、`--declaration`、商品和合集会在预检阶段拒绝，状态记为 `failed_before_submit`。
 - 状态判定依赖平台页面已有的可证明信号，平台改版可能导致状态退化为 `submission_unknown`；此时按人工核对流程处理。
 
 ## 测试与验证
@@ -180,5 +202,7 @@ sau safety resolve \
 - CLI 包装层：阻塞账号不启动浏览器、失败时导出结果、同 request-id 已提交时退出码 0。
 
 `tests/test_publish_pacing.py` 另行覆盖发布节奏的配置校验、窗口边界、prepare-only 豁免、启动浏览器前阻断和 `sau safety status` 快照。
+
+抖音 HTTP 引擎另有 `tests/test_douyin_http_runtime.py`（运行时安装与完整性）、`tests/test_douyin_http_worker.py`（结果分类与提交握手）、`tests/test_douyin_http_engine.py`（预检、进程协议、engine 选择）和 `tests/test_sau_douyin_http_cli.py`（CLI 分发）。HTTP 提交状态映射在 `tests/test_publish_safety.py` 的 `submit_rejected` / `needs_human` 用例中覆盖。
 
 验证只使用 mock 页面和本地临时状态目录，不使用真实账号登录、上传或发表。真实平台验收仍需单独授权和人工核对。

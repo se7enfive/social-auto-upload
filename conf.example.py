@@ -9,6 +9,11 @@ LOCAL_CHROME_HEADLESS = True  # only legacy platforms; douyin/xiaohongshu/tencen
 LOCAL_CHROME_PROFILE_ROOT = ""
 # Import cookies/{platform}_{account}.json into a new profile once; JSON is still refreshed as a backup.
 LOCAL_CHROME_IMPORT_STORAGE_STATE = True
+# Douyin HTTP publish engine (external DouYin_Spider runtime).
+# Empty DOUYIN_HTTP_ROOT = ~/.social-auto-upload/tools/douyin-http (or $SAU_DOUYIN_HTTP_ROOT).
+DOUYIN_HTTP_ROOT = ""
+# auto | browser | http; auto prefers HTTP when the runtime and credentials exist.
+DOUYIN_UPLOAD_ENGINE = "auto"
 DEBUG_MODE = True  # default debug behavior
 # Optional proxy for the YouTube uploader. Where youtube.com is blocked, direct
 # connections time out and the (patchright) chromium does NOT use the system proxy.

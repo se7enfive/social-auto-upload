@@ -116,7 +116,7 @@ git merge origin/main
 
 ## 已知边界
 
-- 只覆盖通过 `sau` CLI 的四条路径。Web 控制台路径 `sau_backend.py` → `myUtils/postVideo.py` 直接构造上传器，不经过 `sau_commands` 包装，因此既不受发布安全层保护，也不受节奏限制；详见 [发布安全与可靠性机制](./publish-safety.md#已知边界与未覆盖路径)。
+- 只覆盖通过 `sau` CLI 的四条路径（抖音视频的浏览器引擎与 HTTP 引擎共用同一入口）。Web 控制台路径 `sau_backend.py` → `myUtils/postVideo.py` 直接构造上传器，不经过 `sau_commands` 包装，因此既不受发布安全层保护，也不受节奏限制；详见 [发布安全与可靠性机制](./publish-safety.md#已知边界与未覆盖路径)。
 - 按本地 `--account` 名称隔离，不做远端账号身份去重；不同别名指向同一远端账号时无法共享限额。
 - 只依据本地记录判断，不核验平台侧实际发布数量；手工在平台发布的内容不计入。
 - 配置文件是本地可信输入；有写权限的人可以修改。本模块不防篡改，也不用于强制执行平台政策。

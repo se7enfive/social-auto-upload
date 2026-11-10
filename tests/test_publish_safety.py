@@ -26,13 +26,16 @@ from utils.publish_safety import (
     PublishBlockedError,
     PublishJournalError,
     PublishLockError,
+    PublishNeedsHuman,
     PublishOutcomeUnknown,
+    PublishRejected,
     PublishRequestConflict,
+    STATUS_FAILED_BEFORE_SUBMIT,
     STATUS_NEEDS_HUMAN,
     STATUS_NOT_SUBMITTED,
     STATUS_PREPARED,
-    STATUS_FAILED_BEFORE_SUBMIT,
     STATUS_SUBMISSION_UNKNOWN,
+    STATUS_SUBMIT_REJECTED,
     STATUS_SUBMITTED,
     atomic_write_json,
     close_browser_resources,
@@ -215,6 +218,19 @@ class PublicationAttemptTests(TempStateTestCase):
         attempt.mark_failed_before_submit("cookie invalid")
         self._attempt(request_id="req-1").ensure_can_start()
 
+    def test_submit_rejected_is_terminal_but_not_blocking(self):
+        attempt = self._attempt(request_id="req-1")
+        attempt.begin()
+        attempt.prepare_submit()
+        attempt.mark_submit_rejected("status_code=8", {"http_status": 200})
+        self.assertTrue(attempt.submit_attempted)
+        self.assertEqual(attempt.status, STATUS_SUBMIT_REJECTED)
+        self.assertEqual(load_records("douyin", "creator")[0]["status"], STATUS_SUBMIT_REJECTED)
+
+        # 明确拒绝不是未决提交，不阻塞后续运行。
+        self.assertEqual(find_unresolved("douyin", "creator"), [])
+        self._attempt(request_id="req-1").ensure_can_start()
+
     def test_post_submit_failure_never_downgrades_to_retryable(self):
         attempt = self._attempt()
         attempt.begin()
@@ -344,6 +360,46 @@ class SubmitOnceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PublishOutcomeUnknown):
             await submit_once(safety=attempt, click=click, wait_success=wait_success)
         self.assertEqual(attempt.status, STATUS_SUBMISSION_UNKNOWN)
+
+    async def test_wait_needs_human_marks_needs_human(self):
+        attempt = self._attempt()
+
+        async def click():
+            return None
+
+        async def wait_success(timeout):
+            raise PublishNeedsHuman("需要短信二次验证")
+
+        with self.assertRaises(PublishNeedsHuman):
+            await submit_once(safety=attempt, click=click, wait_success=wait_success)
+        self.assertEqual(attempt.status, STATUS_NEEDS_HUMAN)
+        self.assertIn("二次验证", attempt.reason)
+
+    async def test_wait_rejected_marks_submit_rejected_without_risk_probe(self):
+        attempt = self._attempt()
+        risks = []
+
+        async def click():
+            return None
+
+        async def wait_success(timeout):
+            raise PublishRejected("status_code=8 内容违规")
+
+        async def detect_risk():
+            risks.append(1)
+            return "captcha"
+
+        with self.assertRaises(PublishRejected):
+            await submit_once(
+                safety=attempt,
+                click=click,
+                wait_success=wait_success,
+                detect_risk=detect_risk,
+            )
+        self.assertEqual(attempt.status, STATUS_SUBMIT_REJECTED)
+        self.assertIn("内容违规", attempt.reason)
+        self.assertTrue(attempt.submit_attempted)
+        self.assertEqual(risks, [])
 
     async def test_journal_failure_before_click_prevents_click(self):
         attempt = self._attempt()

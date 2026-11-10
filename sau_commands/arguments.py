@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse
 import math
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -10,15 +11,40 @@ from conf import BASE_DIR
 from utils.publish_safety import DEFAULT_PUBLISH_TIMEOUT
 
 SCHEDULE_FORMAT = "%Y-%m-%d %H:%M"
+UPLOAD_ENGINES = ("auto", "browser", "http")
+
+
+def default_upload_engine() -> str:
+    """CLI 默认引擎；conf.DOUYIN_UPLOAD_ENGINE 可覆盖，缺省 auto。"""
+    try:
+        import conf
+
+        value = str(getattr(conf, "DOUYIN_UPLOAD_ENGINE", "auto") or "auto").strip().lower()
+    except Exception:
+        value = "auto"
+    return value if value in UPLOAD_ENGINES else "auto"
 
 def has_interactive_terminal() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
+def cookies_dir() -> Path:
+    """浏览器 storage_state 与 HTTP 凭据的根目录；SAU_COOKIES_DIR 可覆盖。"""
+    override = os.environ.get("SAU_COOKIES_DIR", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path(BASE_DIR) / "cookies"
+
+
 def resolve_account_file(platform: str, account_name: str) -> Path:
-    account_file = Path(BASE_DIR) / "cookies" / f"{platform}_{account_name}.json"
-    account_file.parent.mkdir(exist_ok=True)
+    account_file = cookies_dir() / f"{platform}_{account_name}.json"
+    account_file.parent.mkdir(parents=True, exist_ok=True)
     return account_file
+
+
+def resolve_http_account_file(platform: str, account_name: str) -> Path:
+    """HTTP 引擎的扫码票据凭据；与浏览器 storage_state 分开保存。"""
+    return cookies_dir() / f"{platform}_http_{account_name}.json"
 
 
 def parse_tags(raw_tags: str | None) -> list[str]:

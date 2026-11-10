@@ -63,7 +63,7 @@
    - `skills/bilibili-upload/`
    - `skills/dayu-upload/`
 6. 不要默认走历史 `examples/` 和旧 Web 路径，除非当前 CLI 主线不可用。
-7. 抖音、小红书、视频号的登录、校验和发布会打开可见的本机 Chrome 窗口；不要传 `--headless`，也不要用 Playwright Chromium 代替本机 Chrome。首次登录需要我扫码或操作页面。
+7. 抖音、小红书、视频号的登录、校验和发布默认会打开可见的本机 Chrome 窗口；不要传 `--headless`，也不要用 Playwright Chromium 代替本机 Chrome。首次登录需要我扫码或操作页面。例外：抖音视频可选用 HTTP 引擎（需要先经我同意运行 `sau douyin setup --accept-third-party`，再使用 `--engine http`），它不启动浏览器，但没有草稿和 AI 声明能力。
 8. 如果登录流程生成二维码图片，不要只返回图片路径；请直接展示图片，或者明确告诉我该打开哪个本地图片文件扫码。
 9. 如果是 Bilibili 登录，不要在非交互环境里强行代跑；应改为指导我在本地真实终端执行。
 10. 安装完成后，请优先验证以下命令：

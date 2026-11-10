@@ -60,7 +60,7 @@ sau safety --help
 
 ## 准备浏览器
 
-抖音、小红书、视频号使用**本机 Google Chrome** 的专用 profile，登录、校验和发布全过程都会打开可见窗口；不会回退到 Chromium，也不支持 `--headless`。
+抖音、小红书、视频号使用**本机 Google Chrome** 的专用 profile，登录、校验和发布全过程都会打开可见窗口；不会回退到 Chromium，也不支持 `--headless`。例外是抖音视频的可选 HTTP 引擎（`--engine http`），它不启动 Chrome，见下文「抖音 HTTP 引擎（可选）」。
 
 - 默认使用系统安装的 Google Chrome。Chrome 不在常规位置时，在 `conf.py` 设置 `LOCAL_CHROME_PATH` 为实际可执行文件路径；配置无效或留空时按系统 Chrome 通道查找。
 - 每个 `--account` 使用独立 profile，默认位于 `.local/chrome-profiles/<platform>/`。同一 profile 同一时间只能被一个进程打开，否则命令会明确报错。
@@ -125,7 +125,41 @@ sau douyin upload-video --account <account_name> --file videos/demo.mp4 --title 
 sau douyin upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --tags 图文,测试
 ```
 
-抖音登录、检查和发布始终使用可见的本机 Chrome；`--headless` 会在参数解析阶段被拒绝，`--headed` 仅为兼容旧脚本保留。首次登录需要用户在打开的 Chrome 窗口中扫码或完成验证。
+抖音登录、检查和发布默认使用可见的本机 Chrome；`--headless` 会在参数解析阶段被拒绝，`--headed` 仅为兼容旧脚本保留。首次登录需要用户在打开的 Chrome 窗口中扫码或完成验证。
+
+### 抖音 HTTP 引擎（可选）
+
+抖音视频还支持一条纯 HTTP 发布链路，基于外部 `DouYin_Spider` 运行时，不启动浏览器：
+
+```bash
+# 一次性安装外部运行时（第三方代码，无 LICENSE，必须显式确认）
+sau douyin setup --accept-third-party
+sau douyin setup --accept-third-party --source C:/path/to/DouYin_Spider --force
+
+# 扫码登录并校验（登录需要交互式终端）
+sau douyin login --account <account_name> --engine http
+sau douyin check --account <account_name> --engine http
+
+# 直接公开发布；HTTP 无草稿接口，且必须显式接受无 AI 声明
+sau douyin upload-video \
+  --account <account_name> \
+  --file videos/demo.mp4 \
+  --title "示例标题" \
+  --desc "示例简介" \
+  --tags 运动,训练 \
+  --thumbnail cover.jpg \
+  --engine http \
+  --skip-ai-declaration \
+  --visibility public
+```
+
+- `--engine` 可选 `auto`（默认）、`browser`、`http`。`auto` 在传了 `--skip-ai-declaration` 时选择 HTTP；否则仅在运行时已安装且 HTTP 凭据存在时选择 HTTP，其余情况走浏览器。
+- `--visibility` 可选 `public`、`private`、`friends`，默认 `public`。
+- HTTP 不支持 `--prepare-only`、`--declaration`、商品链接和合集；这些参数会在预检阶段报错，并记为 `failed_before_submit`。
+- HTTP 必须提供 `--thumbnail`、`--thumbnail-portrait` 或 `--thumbnail-landscape`；标题按 UTF-16 计算最多 20。
+- 标签会以 `#tag` 文本拼进描述，不是结构化话题。
+- HTTP 失败只报错，不重试、不自动回退浏览器。凭据保存在 `cookies/douyin_http_<account_name>.json`，与浏览器 storage_state 分开。
+- 安装位置、失败语义和已知限制见 [抖音 HTTP 发布引擎](./douyin-http.md)。
 
 抖音短信验证码补充说明：
 
@@ -160,7 +194,7 @@ SAU_XHS_CREATOR_BASE_URL=https://creator.rednote.com sau xiaohongshu login --acc
 
 ## 发布安全与恢复（抖音 / 小红书）
 
-抖音和小红书的四条发布路径（视频／图文）支持同一组可选保护参数：
+抖音视频（浏览器引擎和 HTTP 引擎）、抖音图文、小红书视频和小红书图文支持同一组可选保护参数：
 
 ```bash
 sau douyin upload-video \
@@ -175,7 +209,7 @@ sau douyin upload-video \
 
 | 参数 | 作用 |
 | --- | --- |
-| `--prepare-only` | 完成素材上传、表单填写和排期设置后停在发布页，不点击最终发表；平台仍可能保存素材或草稿 |
+| `--prepare-only` | 完成素材上传、表单填写和排期设置后停在发布页，不点击最终发表；平台仍可能保存素材或草稿。HTTP 引擎没有草稿接口，传此参数会被拒绝 |
 | `--result PATH` | 将本次发布记录导出为 JSON；成功、失败或结果未知时都会尽力写出 |
 | `--request-id TEXT` | 可选的稳定业务请求键；相同键且内容相同、已提交过时直接跳过（退出码 0），内容不同则拒绝 |
 | `--timeout SECONDS` | 总执行预算，默认 1800 秒；提交后的结果观察最多 120 秒且不超过剩余预算 |
@@ -196,10 +230,13 @@ sau douyin upload-video \
 | `preparing` | 已开始，尚未进入提交 | 可重试 |
 | `prepared` | `--prepare-only` 已完成 | 确认后可正式发布 |
 | `failed_before_submit` | 点击前失败，未提交 | 修复原因后重试 |
+| `submit_rejected` | 平台明确拒绝提交（如 HTTP `create_v2` 返回 `status_code != 0`） | 修正内容后可重试 |
 | `submission_unknown` | 已尝试点击，结果无法确认 | **先到平台核对原作品，不要重发** |
 | `needs_human` | 点击前遇到明确验证或风险信号 | 人工完成验证后处理 |
 | `submitted` | 页面出现成功结果 | 无需重试 |
 | `not_submitted` | 人工核对确认未发布 | 可重试 |
+
+`submission_unknown` 和 `needs_human` 是阻塞状态；存在未解决记录时，该账号后续自动发布会失败，换 `--request-id` 不能绕过。`submit_rejected` 不阻塞，同一 request-id 在内容不变时可以重试。
 
 ```bash
 # 只读本地记录：不读取 cookie，也不访问平台
@@ -230,7 +267,7 @@ sau safety resolve \
 }
 ```
 
-不创建该文件即不限制，行为与旧命令一致。只统计真正进入最终点击边界的记录；`--prepare-only` 不受限制。配置无效、记录损坏或缺少时间时会拒绝自动发表，避免静默放宽限制。被拦截时命令在启动浏览器前失败，不创建新记录、不点击发表。`sau safety status` 的 `pacing` 字段显示当前规则、是否允许发布和最早可再次发布的时间。
+不创建该文件即不限制，行为与旧命令一致。只统计真正进入最终点击边界的记录；`--prepare-only` 不受限制。配置无效、记录损坏或缺少时间时会拒绝自动发表，避免静默放宽限制。被拦截时命令在启动提交前失败：浏览器路径不会启动浏览器，HTTP 路径不会启动 worker；都不创建新记录、不提交。`sau safety status` 的 `pacing` 字段显示当前规则、是否允许发布和最早可再次发布的时间。
 
 该模块不模拟人类操作，不提供随机延迟、指纹混淆、模拟滚动或养号等反检测能力。完整规则和上游同步方式见 [发布节奏与账号冷却](./publish-pacing.md)。
 
@@ -238,7 +275,7 @@ sau safety resolve \
 
 本机制降低误发、重复提交和无限等待的风险，但不保证 exactly-once，也不承诺不触发平台风控。它不包含验证码绕过、指纹伪造或规避封禁的能力；遇到验证或账号限制时应人工处理并遵守平台规则。
 
-保护层和节奏限制只覆盖 `sau` CLI 的四条发布路径。Web 控制台路径（`sau_backend.py` → `myUtils/postVideo.py`）直接构造上传器，目前不受保护，详见 [发布安全与可靠性机制](./publish-safety.md#已知边界与未覆盖路径)。
+保护层和节奏限制只覆盖 `sau` CLI 的四条发布路径（抖音视频的浏览器引擎与 HTTP 引擎共用同一条路径）。Web 控制台路径（`sau_backend.py` → `myUtils/postVideo.py`）直接构造上传器，目前不受保护，详见 [发布安全与可靠性机制](./publish-safety.md#已知边界与未覆盖路径)。
 
 完整状态机、机制来源和许可边界见 [发布安全与可靠性机制](./publish-safety.md)。
 
