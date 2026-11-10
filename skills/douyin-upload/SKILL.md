@@ -95,7 +95,7 @@ summary: 使用 sau 登录抖音并发布视频或图文，可选浏览器或 HT
    - 必须提供封面：`--thumbnail`、`--thumbnail-portrait` 或 `--thumbnail-landscape`。
    - 必须传 `--skip-ai-declaration`，表示接受平台上看不到“内容由AI生成”声明。
    - 标题按 UTF-16 计算不超过 20；视频文件非空；定时时间必须是未来。
-   - `--visibility` 明确选择 `public`、`private` 或 `friends`，默认 `public`。
+   - `--visibility` 明确选择 `public`、`private` 或 `friends`，默认 `public`。非 `public` 会强制 HTTP；显式 `--engine browser` 或与 `--prepare-only` 等浏览器专属选项同时使用会报错，不会静默公开。
    - 标签会以 `#tag` 文本拼进描述，不是结构化话题，发布后建议核对。
 
 5. **发布前向用户展示并取得明确确认**：账号、标题、正文、标签、封面路径、排期、可见范围，以及**“本次发布不会写入 AI 内容声明”**。用户最初说“帮我发布”不能替代这次确认。

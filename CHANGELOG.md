@@ -59,7 +59,7 @@
 - 第三方代码不复制进仓库；运行时使用独立 venv、临时 cwd、清理 `PYTHONPATH`/`VIRTUAL_ENV`/`DY_*`，凭据不进 argv、日志或 `--result`。
 - HTTP 登录使用扫码票据，凭据保存为 `cookies/douyin_http_<account>.json`；`check` 校验读链路，不保证 bd-ticket 服务端有效性。
 - 发布通过 worker 拦截 `create_v2` 完成提交握手，复用 `submit_once`；新增非阻塞终态 `submit_rejected`，区分平台明确拒绝与结果未知。
-- HTTP 不支持草稿、AI 声明、商品和合集；必须提供封面并显式传 `--skip-ai-declaration`，失败不重试、不回退浏览器。
+- HTTP 不支持草稿、AI 声明、商品和合集；必须提供封面并显式传 `--skip-ai-declaration`，失败不重试、不回退浏览器。非 `public` 可见范围强制 HTTP，显式浏览器引擎或与浏览器专属选项冲突时直接报错，避免被静默发布为公开。
 - 新增 `http_runtime.py`、`http_worker.py`、`http_engine.py` 及四个测试模块；说明见 [docs/douyin-http.md](./docs/douyin-http.md)。
 - 真实扫码登录、私有视频冒烟和正式发布仍需单独授权与人工核对。
 

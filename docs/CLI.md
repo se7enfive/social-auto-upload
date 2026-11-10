@@ -154,7 +154,7 @@ sau douyin upload-video \
 ```
 
 - `--engine` 可选 `auto`（默认）、`browser`、`http`。`auto` 在传了 `--skip-ai-declaration` 时选择 HTTP；否则仅在运行时已安装且 HTTP 凭据存在时选择 HTTP，其余情况走浏览器。
-- `--visibility` 可选 `public`、`private`、`friends`，默认 `public`。
+- `--visibility` 可选 `public`、`private`、`friends`，默认 `public`。非 `public` 会强制 HTTP；显式 `--engine browser` 或与 `--prepare-only` 等浏览器专属选项同时使用会直接报错。
 - HTTP 不支持 `--prepare-only`、`--declaration`、商品链接和合集；这些参数会在预检阶段报错，并记为 `failed_before_submit`。
 - HTTP 必须提供 `--thumbnail`、`--thumbnail-portrait` 或 `--thumbnail-landscape`；标题按 UTF-16 计算最多 20。
 - 标签会以 `#tag` 文本拼进描述，不是结构化话题。

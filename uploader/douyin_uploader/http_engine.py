@@ -98,6 +98,27 @@ def resolve_upload_engine(request) -> str:
         raise DouyinHttpPreflightError(
             f"未知抖音上传引擎 {requested!r}，可选 auto/browser/http"
         )
+    visibility = str(
+        getattr(request, "visibility", "public") or "public"
+    ).strip().lower()
+    if visibility not in VISIBILITY_VALUES:
+        raise DouyinHttpPreflightError(
+            f"未知可见范围 {visibility!r}，可选 public/private/friends"
+        )
+    if visibility != "public":
+        # 浏览器路径只会公开发布；非公开范围必须走 HTTP，绝不能静默降级。
+        if _browser_only_options(request):
+            raise DouyinHttpPreflightError(
+                "非公开可见范围只能由 HTTP 引擎处理，但当前选项需要浏览器引擎"
+                "（--prepare-only / --declaration / 商品 / 合集）；"
+                "请改用 --visibility public，或去掉这些选项后重试"
+            )
+        if requested == ENGINE_BROWSER:
+            raise DouyinHttpPreflightError(
+                "浏览器引擎只会公开发布，不能使用 --visibility private/friends；"
+                "请改用 --engine http，或改为 --visibility public"
+            )
+        return ENGINE_HTTP
     if requested != ENGINE_AUTO:
         return requested
     if _browser_only_options(request):

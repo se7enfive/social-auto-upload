@@ -120,6 +120,7 @@ class EngineResolutionTests(unittest.TestCase):
         options = {
             "engine": "auto",
             "account_name": "ops",
+            "visibility": "public",
             "prepare_only": False,
             "declaration": None,
             "product_link": "",
@@ -152,6 +153,30 @@ class EngineResolutionTests(unittest.TestCase):
                 resolve_upload_engine(self._request(skip_ai_declaration=True)),
                 "http",
             )
+
+    def test_non_public_visibility_forces_http_without_runtime(self):
+        with patch.object(http_engine, "is_runtime_installed", return_value=False):
+            for visibility in ("private", "friends"):
+                self.assertEqual(
+                    resolve_upload_engine(self._request(visibility=visibility)),
+                    "http",
+                )
+
+    def test_non_public_visibility_rejects_browser_engine(self):
+        with self.assertRaisesRegex(DouyinHttpPreflightError, "浏览器引擎只会公开发布"):
+            resolve_upload_engine(
+                self._request(engine="browser", visibility="private")
+            )
+
+    def test_non_public_visibility_conflicts_with_browser_only_options(self):
+        with self.assertRaisesRegex(DouyinHttpPreflightError, "非公开可见范围"):
+            resolve_upload_engine(
+                self._request(visibility="friends", prepare_only=True)
+            )
+
+    def test_unknown_visibility_is_rejected(self):
+        with self.assertRaisesRegex(DouyinHttpPreflightError, "可见范围"):
+            resolve_upload_engine(self._request(visibility="unlisted"))
 
     def test_browser_only_option_wins_over_http(self):
         with patch.object(http_engine, "is_runtime_installed", return_value=True):

@@ -112,7 +112,7 @@ HTTP 引擎的硬性要求：
 - 标题不能为空，且按 UTF-16 code unit 计算不超过 20。含 emoji 时不要按字符数估算。
 - 视频文件必须存在且非空。
 - `--schedule` 必须是未来时间，格式仍为 `YYYY-MM-DD HH:MM`。
-- `--visibility` 可选 `public`（默认）、`private`、`friends`。
+- `--visibility` 可选 `public`（默认）、`private`、`friends`。非 `public` 会强制走 HTTP；显式 `--engine browser`，或与 `--prepare-only` / `--declaration` / 商品 / 合集同时使用，会直接报错，避免被浏览器引擎静默发布为公开。
 
 标签不会作为结构化 challenge 提交，而是由父进程拼进描述：正文 + ` #tag1 #tag2`。首次发布后建议在创作中心核对话题是否被平台识别。
 
@@ -129,10 +129,11 @@ HTTP 引擎的硬性要求：
 
 `--engine` 可选 `auto`（默认）、`browser`、`http`。`auto` 规则按顺序如下：
 
-1. 传了 `--prepare-only`、`--declaration`、商品链接或合集 → 浏览器。
-2. 传了 `--skip-ai-declaration` → HTTP。此时若运行时或凭据缺失，会在预检阶段报错，**不会回退浏览器**。
-3. HTTP 运行时已安装且 HTTP 凭据文件存在 → HTTP。
-4. 否则 → 浏览器。
+1. 传了非 `public` 的 `--visibility` → HTTP；如果同时带浏览器专属选项（`--prepare-only`、`--declaration`、商品、合集），直接报错，不回退浏览器。
+2. 传了 `--prepare-only`、`--declaration`、商品链接或合集 → 浏览器。
+3. 传了 `--skip-ai-declaration` → HTTP。此时若运行时或凭据缺失，会在预检阶段报错，**不会回退浏览器**。
+4. HTTP 运行时已安装且 HTTP 凭据文件存在 → HTTP。
+5. 否则 → 浏览器。
 
 也可以在 `conf.py` 设置默认值：
 

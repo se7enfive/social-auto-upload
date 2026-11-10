@@ -103,6 +103,7 @@ sau douyin upload-video \
   - 不支持 `--prepare-only`、`--declaration`、`--product-link`、`--product-title`、`--collection`
   - 标题按 UTF-16 不超过 20；`--schedule` 必须是未来时间
   - `--tags` 会以 `#tag` 文本拼进描述，不是结构化话题
+  - 非 `public` 的 `--visibility` 会强制 HTTP；显式 `--engine browser` 或与 `--prepare-only` 等浏览器专属选项同时使用会直接报错，避免误发为公开
 
 ### 上传图文
 
