@@ -45,6 +45,15 @@ def _fake_runtime(root: Path) -> Path:
     return runtime
 
 
+class SelfTestImportOrderTests(unittest.TestCase):
+    def test_douyin_api_import_precedes_builder_auth(self):
+        code = http_runtime._SELF_TEST_CODE
+        self.assertLess(
+            code.index("import dy_apis.douyin_api"),
+            code.index("from builder.auth import DouyinAuth"),
+        )
+
+
 class RuntimePathTests(unittest.TestCase):
     def test_env_override_and_commit_validation(self):
         with tempfile.TemporaryDirectory() as temp_dir:

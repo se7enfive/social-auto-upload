@@ -11,6 +11,48 @@ from unittest.mock import patch
 from uploader.douyin_uploader import http_worker
 
 
+class LazyImportOrderTests(unittest.TestCase):
+    def test_load_douyin_auth_imports_douyin_api_first(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "dy_apis").mkdir()
+            (root / "builder").mkdir()
+            (root / "dy_apis" / "__init__.py").write_text("", encoding="utf-8")
+            (root / "builder" / "__init__.py").write_text("", encoding="utf-8")
+            (root / "dy_apis" / "douyin_api.py").write_text(
+                "from builder.auth import DouyinAuth\nAPI_READY = True\n",
+                encoding="utf-8",
+            )
+            (root / "builder" / "auth.py").write_text(
+                "from dy_apis import douyin_api\n"
+                "class DouyinAuth:\n"
+                "    @staticmethod\n"
+                "    def from_cookie(*args, **kwargs):\n"
+                "        return object()\n",
+                encoding="utf-8",
+            )
+            tracked = (
+                "dy_apis",
+                "dy_apis.douyin_api",
+                "builder",
+                "builder.auth",
+            )
+            saved = {name: sys.modules.get(name) for name in tracked}
+            sys.path.insert(0, str(root))
+            try:
+                for name in tracked:
+                    sys.modules.pop(name, None)
+                cls = http_worker._load_douyin_auth()
+                self.assertTrue(callable(cls.from_cookie))
+            finally:
+                sys.path.remove(str(root))
+                for name, module in saved.items():
+                    if module is None:
+                        sys.modules.pop(name, None)
+                    else:
+                        sys.modules[name] = module
+
+
 class PublishResultTests(unittest.TestCase):
     def _gate(self, **kwargs):
         gate = http_worker.SubmitGate(io.StringIO())

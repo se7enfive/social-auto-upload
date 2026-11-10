@@ -70,6 +70,29 @@ def _insert_runtime_src(task: dict) -> None:
     sys.path.insert(0, str(src))
 
 
+def _load_douyin_auth():
+    """导入第三方 DouyinAuth，并避开 builder.auth / douyin_api 的循环导入。
+
+    ``builder.auth`` 在模块顶部 ``from dy_apis import douyin_api``，而
+    ``dy_apis.douyin_api`` 又 ``from builder.auth import DouyinAuth``。
+    以 ``builder.auth`` 或 ``dy_apis.douyin_creator_api`` 为入口都会触发
+    partially initialized module；必须先完整导入 ``dy_apis.douyin_api``。
+    """
+    import dy_apis.douyin_api  # noqa: F401  # 必须先导入，建立模块顺序
+    from builder.auth import DouyinAuth
+
+    return DouyinAuth
+
+
+def _load_creator_api():
+    """返回 (douyin_creator_api, DouyinCreatorAPI)，导入顺序与 worker 一致。"""
+    _load_douyin_auth()
+    from dy_apis import douyin_creator_api
+    from dy_apis.douyin_creator_api import DouyinCreatorAPI
+
+    return douyin_creator_api, DouyinCreatorAPI
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -93,7 +116,7 @@ def _load_credentials(path: str | Path) -> dict:
 
 
 def _build_auth(credentials: dict):
-    from builder.auth import DouyinAuth
+    DouyinAuth = _load_douyin_auth()
 
     return DouyinAuth.from_cookie(
         credentials["cookie"],
@@ -147,6 +170,7 @@ class SubmitGate:
         self.transport_error: str | None = None
 
     def install(self):
+        # _run_publish 已通过 _load_creator_api() 按安全顺序加载；这里直接取模块。
         from dy_apis import douyin_creator_api as api
 
         original = api._request
@@ -255,9 +279,8 @@ def _publish_result(gate: SubmitGate, success, message, res_json) -> dict:
 
 
 def _run_self_test(task: dict, protocol) -> int:
-    from builder.auth import DouyinAuth
-    from dy_apis import douyin_creator_api
-    from dy_apis.douyin_creator_api import DouyinCreatorAPI
+    DouyinAuth = _load_douyin_auth()
+    douyin_creator_api, DouyinCreatorAPI = _load_creator_api()
 
     assert callable(DouyinAuth.from_cookie)
     assert callable(DouyinAuth.from_qrcode_login)
@@ -276,7 +299,7 @@ def _run_self_test(task: dict, protocol) -> int:
 
 
 def _run_login(task: dict, protocol) -> int:
-    from builder.auth import DouyinAuth
+    DouyinAuth = _load_douyin_auth()
 
     timeout = float(task.get("timeout") or 300)
     credentials_path = task.get("credentials_path")
@@ -317,7 +340,7 @@ def _run_login(task: dict, protocol) -> int:
 
 
 def _run_check(task: dict, protocol) -> int:
-    from dy_apis.douyin_creator_api import DouyinCreatorAPI
+    _, DouyinCreatorAPI = _load_creator_api()
 
     credentials_path = task.get("credentials_path")
     if not credentials_path:
@@ -345,7 +368,7 @@ def _run_check(task: dict, protocol) -> int:
 
 
 def _run_publish(task: dict, protocol) -> int:
-    from dy_apis.douyin_creator_api import DouyinCreatorAPI
+    _, DouyinCreatorAPI = _load_creator_api()
 
     credentials_path = task.get("credentials_path")
     if not credentials_path:

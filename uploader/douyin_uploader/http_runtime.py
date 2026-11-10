@@ -506,6 +506,9 @@ def _freeze(python_path: Path, lock_path: Path, timeout: float) -> None:
 _SELF_TEST_CODE = """
 import sys
 sys.path.insert(0, sys.argv[1])
+# builder.auth 与 dy_apis.douyin_api 互相导入；必须先导入 douyin_api，
+# 否则会得到 partially initialized module 的 ImportError。
+import dy_apis.douyin_api  # noqa: F401
 from builder.auth import DouyinAuth
 from dy_apis import douyin_creator_api
 from dy_apis.douyin_creator_api import DouyinCreatorAPI
