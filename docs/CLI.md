@@ -140,6 +140,9 @@ sau douyin setup --accept-third-party --source C:/path/to/DouYin_Spider --force
 sau douyin login --account <account_name> --engine http
 sau douyin check --account <account_name> --engine http
 
+# 扫码被风控时，从同账号已登录 Chrome 的 storage_state 导入 HTTP 凭据
+sau douyin import-http-cookies --account <account_name>
+
 # 直接公开发布；HTTP 无草稿接口，且必须显式接受无 AI 声明
 sau douyin upload-video \
   --account <account_name> \
@@ -159,6 +162,7 @@ sau douyin upload-video \
 - HTTP 必须提供 `--thumbnail`、`--thumbnail-portrait` 或 `--thumbnail-landscape`；标题按 UTF-16 计算最多 20。
 - 标签会以 `#tag` 文本拼进描述，不是结构化话题。
 - HTTP 失败只报错，不重试、不自动回退浏览器。凭据保存在 `cookies/douyin_http_<account_name>.json`，与浏览器 storage_state 分开。
+- `import-http-cookies` 读取同账号浏览器 storage_state 的完整 Cookie 与安全 SDK 票据，先只读校验、通过后才原子替换 HTTP 凭据；已存在凭据需 `--force` 才会尝试替换，校验失败保留原文件。
 - 安装位置、失败语义和已知限制见 [抖音 HTTP 发布引擎](./douyin-http.md)。
 
 抖音短信验证码补充说明：

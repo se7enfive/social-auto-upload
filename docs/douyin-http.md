@@ -80,6 +80,17 @@ sau douyin login --account <account> --engine http
 - CLI 在终端打印二维码，同时保存到 `.local/qrcodes/douyin-http-<account>.png`（可用 `SAU_STATE_DIR` 改写状态根），流程结束后删除临时图。
 - 成功后写入 `cookies/douyin_http_<account>.json`（可用 `SAU_COOKIES_DIR` 改写根目录），权限尽力设为 `600`。
 
+若纯 HTTP 扫码持续被平台风控（例如 `check_qrconnect` 长时间返回 `error_code=7`），可改用本机已登录 Chrome 的 storage_state 导入，绕过二维码轮询：
+
+```bash
+sau douyin import-http-cookies --account <account>
+```
+
+- 默认读取浏览器引擎的 `cookies/douyin_<account>.json`；也可用 `--storage-state <path>` 指定同一账号、同一浏览器 profile 导出的完整 Playwright storage_state。
+- Cookie 与 `ticket` / `ts_sign` / `client_cert` / `private_key` 必须来自同一次导出、同一次登录会话。命令会检查 `sessionid` 和 `creator.douyin.com` 的安全 SDK 票据，缺字段时拒绝写入。
+- 结果先写临时文件并执行只读 `check`，通过后才原子替换为 `cookies/douyin_http_<account>.json`；校验失败不会覆盖已有 HTTP 凭据。已存在凭据时需显式加 `--force` 才会尝试替换。
+- 该命令不向日志或终端打印 Cookie、票据和私钥。导入只适用于本机已有、仍有效的登录态；凭据过期后仍需要重新取得登录态。
+
 凭据包含 `cookie`、`ticket`、`ts_sign`、`private_key`，以及可选的 `client_cert`、`dtrait_blob`。它与浏览器路径的 `cookies/douyin_<account>.json` 分开保存，互不覆盖。
 
 校验：

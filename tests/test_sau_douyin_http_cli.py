@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import sau_cli
@@ -77,6 +78,30 @@ class CliParserTests(unittest.TestCase):
         )
         self.assertEqual(check_args.engine, "browser")
 
+    def test_import_http_cookies_flags(self):
+        parser = self._parser()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = Path(temp_dir) / "storage.json"
+            storage.write_text("{}", encoding="utf-8")
+            args = parser.parse_args(
+                [
+                    "douyin",
+                    "import-http-cookies",
+                    "--account",
+                    "ops",
+                    "--storage-state",
+                    str(storage),
+                    "--force",
+                ]
+            )
+            self.assertEqual(args.storage_state, storage)
+            self.assertTrue(args.force)
+        defaults = parser.parse_args(
+            ["douyin", "import-http-cookies", "--account", "ops"]
+        )
+        self.assertIsNone(defaults.storage_state)
+        self.assertFalse(defaults.force)
+
     def test_setup_flags(self):
         args = self._parser().parse_args(
             [
@@ -138,6 +163,72 @@ class RunDispatchTests(unittest.IsolatedAsyncioTestCase):
         login.assert_awaited_once_with(
             "ops", headless=False, engine="http", force=True
         )
+
+    async def test_import_http_cookies_requires_force_for_existing_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "douyin_http_ops.json"
+            target.write_text("{}", encoding="utf-8")
+            storage = Path(temp_dir) / "storage.json"
+            storage.write_text("{}", encoding="utf-8")
+            args = argparse.Namespace(
+                action="import-http-cookies",
+                account="ops",
+                storage_state=storage,
+                force=False,
+            )
+            with (
+                patch.object(
+                    douyin_command,
+                    "resolve_http_account_file",
+                    return_value=target,
+                ),
+                patch.object(
+                    douyin_command,
+                    "resolve_account_file",
+                    return_value=storage,
+                ),
+                patch.object(
+                    douyin_command, "import_http_credentials_from_browser"
+                ) as importer,
+            ):
+                with self.assertRaises(RuntimeError):
+                    await douyin_command.run(args)
+            importer.assert_not_awaited()
+
+    async def test_import_http_cookies_dispatches_and_reports_valid(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = Path(temp_dir) / "storage.json"
+            storage.write_text("{}", encoding="utf-8")
+            target = Path(temp_dir) / "douyin_http_ops.json"
+            args = argparse.Namespace(
+                action="import-http-cookies",
+                account="ops",
+                storage_state=storage,
+                force=False,
+            )
+            importer = AsyncMock(
+                return_value=SimpleNamespace(account_file=target, valid=True)
+            )
+            with (
+                patch.object(
+                    douyin_command,
+                    "resolve_http_account_file",
+                    return_value=target,
+                ),
+                patch.object(
+                    douyin_command,
+                    "resolve_account_file",
+                    return_value=storage,
+                ),
+                patch.object(
+                    douyin_command,
+                    "import_http_credentials_from_browser",
+                    importer,
+                ),
+            ):
+                code = await douyin_command.run(args)
+            self.assertEqual(code, 0)
+            importer.assert_awaited_once_with("ops", storage)
 
     async def test_setup_runs_installer_in_thread(self):
         args = argparse.Namespace(

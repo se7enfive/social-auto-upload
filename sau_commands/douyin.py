@@ -16,6 +16,7 @@ from uploader.douyin_uploader.main import (
 from uploader.douyin_uploader.http_engine import (
     ENGINE_HTTP,
     check_douyin_http,
+    import_http_credentials_from_browser,
     login_douyin_http,
     resolve_upload_engine,
     upload_video_http,
@@ -70,6 +71,22 @@ def register(platform_parsers):
                 help="Force a new HTTP QR login even if saved credentials look valid",
             )
             add_runtime_flags(action_parser, default_headless=False, allow_headless=False)
+
+    import_parser = douyin_actions.add_parser(
+        "import-http-cookies",
+        help="Import HTTP credentials from an already logged-in Chrome storage_state",
+    )
+    import_parser.add_argument("--account", required=True, help="Douyin user-defined account_name")
+    import_parser.add_argument(
+        "--storage-state",
+        type=existing_file_path,
+        help="Playwright storage_state JSON; defaults to the browser cookie file for --account",
+    )
+    import_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing HTTP credential file",
+    )
 
     setup_parser = douyin_actions.add_parser(
         "setup", help="Install the external DouYin_Spider HTTP runtime"
@@ -416,6 +433,25 @@ async def upload_note(request: DouyinNoteUploadRequest) -> Path:
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
+    if args.action == "import-http-cookies":
+        account_lock = resolve_account_file("douyin", args.account)
+        with session_lock(account_lock, "douyin", args.account):
+            account_file = resolve_http_account_file("douyin", args.account)
+            if account_file.is_file() and not bool(getattr(args, "force", False)):
+                raise RuntimeError(
+                    f"HTTP 凭据已存在：{account_file}；确认覆盖请加 --force"
+                )
+            storage_state = getattr(args, "storage_state", None) or account_lock
+            result = await import_http_credentials_from_browser(
+                args.account, storage_state
+            )
+        if result.valid:
+            print(f"Douyin HTTP credentials imported: {result.account_file}")
+            print("valid")
+        else:
+            print("invalid; existing HTTP credentials were left unchanged")
+        return 0 if result.valid else 1
+
     if args.action == "setup":
         runtime = await asyncio.to_thread(
             ensure_runtime,

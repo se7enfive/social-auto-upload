@@ -77,6 +77,149 @@ class HttpLoginResult:
     reused: bool = False
 
 
+@dataclass(slots=True)
+class HttpImportResult:
+    account_file: Path
+    valid: bool
+
+
+class DouyinHttpCredentialImportError(DouyinHttpPreflightError):
+    """浏览器登录态无法安全转换为 HTTP 凭据。"""
+
+
+# Playwright storage_state 中 Chrome 写入的 Cookie 顺序；同名重复项保留最后值。
+_STORAGE_COOKIE_ORDER = (
+    "bd_ticket_guard_client_web_domain", "n_mh", "has_biz_token",
+    "__security_server_data_status", "_bd_ticket_crypt_doamin",
+    "SEARCH_RESULT_LIST_TYPE", "live_use_vvc", "store-region",
+    "store-region-src", "d_ticket", "is_staff_user", "enter_pc_once",
+    "hevc_supported", "passport_csrf_token", "passport_csrf_token_default",
+    "UIFID", "uid_tt", "uid_tt_ss", "sid_tt", "sessionid", "sessionid_ss",
+    "bd_ticket_guard_ts_sign_id", "__security_mc_1_s_sdk_crypt_sdk",
+    "__security_mc_1_s_sdk_cert_key",
+    "__security_mc_1_s_sdk_sign_data_key_web_protect", "is_dbsc",
+    "is_support_rtm_web_ts", "stream_recommend_feed_params",
+    "home_can_add_dy_2_desktop", "strategyABtestKey",
+    "publish_badge_show_info", "is_dash_user", "sid_guard",
+    "session_tlb_tag", "sid_ucp_v1", "ssid_ucp_v1", "IsDouyinActive",
+    "x-web-secsdk-uid", "ttwid", "csrf_session_id", "s_v_web_id",
+    "odin_tt", "x_tt_token", "fpk1", "fpk2",
+)
+_SDK_TICKET_KEY = "security-sdk/s_sdk_sign_data_key/web_protect"
+_SDK_PRIVATE_KEY_KEY = "security-sdk/s_sdk_crypt_sdk"
+
+
+def _decode_sdk_entry(raw: str) -> dict:
+    """解开 localStorage 的 ``{"data": "<json string>"}`` 包装。"""
+    try:
+        outer = json.loads(raw)
+        inner = json.loads(outer["data"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DouyinHttpCredentialImportError(
+            "浏览器安全 SDK 凭据格式无法识别"
+        ) from exc
+    if not isinstance(inner, dict):
+        raise DouyinHttpCredentialImportError("浏览器安全 SDK 凭据不是 JSON 对象")
+    return inner
+
+
+def _storage_sdk_material(data: dict) -> dict:
+    """从同一次导出的 storage_state 提取票据；不读取文件之外的数据。"""
+    for origin in data.get("origins") or []:
+        if str(origin.get("origin") or "") != "https://creator.douyin.com":
+            continue
+        entries = {
+            str(entry.get("name") or ""): str(entry.get("value") or "")
+            for entry in origin.get("localStorage") or []
+        }
+        ticket_raw = entries.get(_SDK_TICKET_KEY)
+        if not ticket_raw:
+            break
+        material = _decode_sdk_entry(ticket_raw)
+        keys_raw = entries.get(_SDK_PRIVATE_KEY_KEY)
+        if keys_raw:
+            private_key = _decode_sdk_entry(keys_raw).get("ec_privateKey")
+            if private_key:
+                material["private_key"] = private_key
+        return material
+    raise DouyinHttpCredentialImportError(
+        "storage_state 缺少 creator.douyin.com 的安全 SDK 票据；"
+        "请先用浏览器引擎登录并导出同一账号的完整登录态"
+    )
+
+
+def _storage_cookie_string(data: dict, ticket_material: dict) -> str:
+    cookies = data.get("cookies")
+    if not isinstance(cookies, list):
+        raise DouyinHttpCredentialImportError("storage_state 缺少 cookies 列表")
+    now = time.time()
+    pairs: dict[str, str] = {}
+    order: list[str] = []
+    for item in cookies:
+        if not isinstance(item, dict):
+            continue
+        domain = str(item.get("domain") or "").lower().lstrip(".")
+        if domain != "douyin.com" and not domain.endswith(".douyin.com"):
+            continue
+        expires = item.get("expires")
+        if isinstance(expires, (int, float)) and expires > 0 and expires <= now:
+            continue
+        name = str(item.get("name") or "").strip()
+        value = str(item.get("value") or "")
+        if not name or not value:
+            continue
+        if name not in pairs:
+            order.append(name)
+        pairs[name] = value
+    if "sessionid" not in pairs:
+        raise DouyinHttpCredentialImportError("storage_state 中没有登录态 sessionid")
+    ts_sign = str(ticket_material.get("ts_sign") or "").strip()
+    if ts_sign:
+        if "bd_ticket_guard_ts_sign_id" not in pairs:
+            order.append("bd_ticket_guard_ts_sign_id")
+        pairs["bd_ticket_guard_ts_sign_id"] = ts_sign
+    ordered = [name for name in _STORAGE_COOKIE_ORDER if name in pairs]
+    ordered.extend(name for name in order if name not in ordered)
+    return "; ".join(f"{name}={pairs[name]}" for name in ordered)
+
+
+def build_http_credentials_from_storage_state(storage_path: Path) -> dict:
+    """把本机已登录 Chrome 的 storage_state 转成 HTTP worker 凭据。"""
+    path = Path(storage_path).expanduser()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DouyinHttpCredentialImportError(
+            f"无法读取浏览器 storage_state：{path}"
+        ) from exc
+    if not isinstance(data, dict):
+        raise DouyinHttpCredentialImportError("storage_state 必须是 JSON 对象")
+    material = _storage_sdk_material(data)
+    payload = {
+        "schema_version": 1,
+        "cookie": _storage_cookie_string(data, material),
+        "ticket": material.get("ticket"),
+        "ts_sign": material.get("ts_sign"),
+        "client_cert": material.get("client_cert"),
+        "private_key": material.get("private_key"),
+        "dtrait_blob": material.get("dtrait_blob"),
+        "saved_at": datetime.now().astimezone().isoformat(),
+        "source": "browser-storage-state",
+    }
+    missing = [
+        key
+        for key in ("cookie", "ticket", "ts_sign", "private_key")
+        if not str(payload.get(key) or "").strip()
+    ]
+    if missing:
+        raise DouyinHttpCredentialImportError(
+            f"浏览器 storage_state 缺少 HTTP 发布所需字段：{', '.join(missing)}"
+        )
+    payload["platform"] = "douyin"
+    payload["engine"] = ENGINE_HTTP
+    return payload
+
+
 def redact_secrets(text: str) -> str:
     return _SECRET_RE.sub(r"\1\2***", str(text or ""))
 
@@ -637,14 +780,18 @@ async def upload_video_http(request, attempt) -> dict:
         await worker.aclose()
 
 
-async def check_douyin_http(account_name: str) -> bool:
+async def check_douyin_http(
+    account_name: str, *, credentials_path: Path | None = None
+) -> bool:
     try:
         runtime = validate_runtime()
     except DouyinHttpRuntimeError as exc:
         raise DouyinHttpError(
             f"{exc}。请先运行 `sau douyin setup --accept-third-party`"
         ) from exc
-    credentials_path = resolve_http_account_file("douyin", account_name)
+    credentials_path = Path(credentials_path) if credentials_path else resolve_http_account_file(
+        "douyin", account_name
+    )
     if not credentials_path.is_file():
         raise DouyinHttpError(
             f"HTTP 凭据不存在：{credentials_path}。请先运行 "
@@ -706,6 +853,33 @@ def _write_private_json(path: Path, payload: dict) -> None:
         os.chmod(path, 0o600)
     except OSError:
         pass
+
+
+async def import_http_credentials_from_browser(
+    account_name: str, storage_path: Path
+) -> HttpImportResult:
+    """导入已登录 Chrome 的凭据，先只读校验候选文件再原子替换。"""
+    payload = build_http_credentials_from_storage_state(storage_path)
+    payload["account"] = account_name
+    account_file = resolve_http_account_file("douyin", account_name)
+    account_file.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{account_file.name}.", suffix=".import", dir=account_file.parent
+    )
+    os.close(fd)
+    staging = Path(temp_name)
+    try:
+        _write_private_json(staging, payload)
+        valid = await check_douyin_http(account_name, credentials_path=staging)
+        if valid:
+            os.replace(staging, account_file)
+            try:
+                os.chmod(account_file, 0o600)
+            except OSError:
+                pass
+        return HttpImportResult(account_file=account_file, valid=valid)
+    finally:
+        staging.unlink(missing_ok=True)
 
 
 async def login_douyin_http(

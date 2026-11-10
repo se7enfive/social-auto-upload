@@ -7,15 +7,19 @@ import types
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from sau_commands.douyin import DouyinVideoUploadRequest
 from uploader.douyin_uploader import http_engine
 from uploader.douyin_uploader.http_engine import (
+    DouyinHttpCredentialImportError,
     DouyinHttpPreflightError,
     DouyinHttpWorkerExited,
     HttpWorkerProcess,
+    build_http_credentials_from_storage_state,
     check_douyin_http,
+    import_http_credentials_from_browser,
     login_douyin_http,
     redact_secrets,
     resolve_upload_engine,
@@ -496,6 +500,123 @@ class CheckAndLoginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["platform"], "douyin")
         self.assertEqual(payload["engine"], "http")
         self.assertEqual(payload["ticket"], "ticket")
+
+
+class StorageStateImportTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.storage = self.tmp / "storage.json"
+        self.account_file = self.tmp / "douyin_http_ops.json"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _write_storage(self, *, ticket=True, sessionid=True):
+        sdk = {
+            "ticket": "hash.test" if ticket else "",
+            "ts_sign": "ts.2.test",
+            "client_cert": "pub.test",
+            "private_key": "private-test",
+        }
+        cookies = [
+            {"name": "sessionid", "value": "session", "domain": ".douyin.com", "expires": -1},
+            {"name": "ttwid", "value": "ttwid", "domain": ".douyin.com", "expires": -1},
+            {"name": "expired", "value": "old", "domain": ".douyin.com", "expires": 1},
+            {"name": "other", "value": "ignored", "domain": "example.com", "expires": -1},
+        ]
+        if not sessionid:
+            cookies.pop(0)
+        self.storage.write_text(
+            json.dumps(
+                {
+                    "cookies": cookies,
+                    "origins": [
+                        {
+                            "origin": "https://creator.douyin.com",
+                            "localStorage": [
+                                {
+                                    "name": "security-sdk/s_sdk_sign_data_key/web_protect",
+                                    "value": json.dumps({"data": json.dumps(sdk)}),
+                                },
+                                {
+                                    "name": "security-sdk/s_sdk_crypt_sdk",
+                                    "value": json.dumps(
+                                        {"data": json.dumps({"ec_privateKey": "ec-private-test"})}
+                                    ),
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_build_credentials_from_storage_state(self):
+        self._write_storage()
+        payload = build_http_credentials_from_storage_state(self.storage)
+        self.assertEqual(payload["ticket"], "hash.test")
+        self.assertEqual(payload["ts_sign"], "ts.2.test")
+        self.assertEqual(payload["private_key"], "ec-private-test")
+        self.assertEqual(payload["source"], "browser-storage-state")
+        self.assertIn("sessionid=session", payload["cookie"])
+        self.assertIn("bd_ticket_guard_ts_sign_id=ts.2.test", payload["cookie"])
+        self.assertNotIn("expired=old", payload["cookie"])
+        self.assertNotIn("other=ignored", payload["cookie"])
+
+    def test_missing_login_or_ticket_is_rejected(self):
+        self._write_storage(sessionid=False)
+        with self.assertRaises(DouyinHttpCredentialImportError):
+            build_http_credentials_from_storage_state(self.storage)
+        self._write_storage(ticket=False)
+        with self.assertRaises(DouyinHttpCredentialImportError):
+            build_http_credentials_from_storage_state(self.storage)
+
+    async def test_import_writes_private_json_and_checks(self):
+        self._write_storage()
+        checker = AsyncMock(return_value=True)
+        result = SimpleNamespace(
+            account_file=self.account_file, valid=True
+        )
+        with (
+            patch.object(
+                http_engine,
+                "resolve_http_account_file",
+                return_value=self.account_file,
+            ),
+            patch.object(http_engine, "check_douyin_http", checker),
+        ):
+            imported = await import_http_credentials_from_browser(
+                "ops", self.storage
+            )
+        self.assertEqual(imported.account_file, result.account_file)
+        self.assertTrue(imported.valid)
+        payload = json.loads(self.account_file.read_text(encoding="utf-8"))
+        self.assertEqual(payload["account"], "ops")
+        self.assertEqual(payload["engine"], "http")
+        checker.assert_awaited_once()
+        checked_path = checker.await_args.kwargs["credentials_path"]
+        self.assertFalse(checked_path.exists())
+
+    async def test_invalid_candidate_does_not_replace_existing_credentials(self):
+        self._write_storage()
+        self.account_file.write_text("original", encoding="utf-8")
+        checker = AsyncMock(return_value=False)
+        with (
+            patch.object(
+                http_engine,
+                "resolve_http_account_file",
+                return_value=self.account_file,
+            ),
+            patch.object(http_engine, "check_douyin_http", checker),
+        ):
+            imported = await import_http_credentials_from_browser(
+                "ops", self.storage
+            )
+        self.assertFalse(imported.valid)
+        self.assertEqual(self.account_file.read_text(encoding="utf-8"), "original")
+        self.assertEqual(list(self.tmp.glob("*.import")), [])
 
 
 class RuntimeStatusTests(unittest.TestCase):
