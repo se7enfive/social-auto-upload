@@ -76,6 +76,7 @@ sau douyin login --account <account> --engine http
 
 - 若已存在 HTTP 凭据且 `check` 通过，会直接复用，不重复扫码。
 - `--force` 强制重新扫码。
+- `login --engine auto`（默认）在运行时已安装时选择 HTTP；如需浏览器登录，显式传 `--engine browser`。`check --engine auto` 仅在运行时已安装且 HTTP 凭据存在时选择 HTTP。
 - CLI 在终端打印二维码，同时保存到 `.local/qrcodes/douyin-http-<account>.png`（可用 `SAU_STATE_DIR` 改写状态根），流程结束后删除临时图。
 - 成功后写入 `cookies/douyin_http_<account>.json`（可用 `SAU_COOKIES_DIR` 改写根目录），权限尽力设为 `600`。
 

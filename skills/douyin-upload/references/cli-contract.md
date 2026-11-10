@@ -29,6 +29,7 @@ sau douyin login --account <account> [--engine auto|browser|http] [--force]
 - 浏览器路径（默认）:
   - 在专用本机 Chrome profile 中启动抖音登录流程，并把登录态导出为 `cookies/douyin_<account>.json` 备份
   - 如果专用 profile 已经登录，会直接复用，不重复生成二维码
+- `--engine auto`（CLI 默认）在 HTTP 运行时已安装时选择 HTTP；如需浏览器登录，显式传 `--engine browser`
 - HTTP 路径（`--engine http`）:
   - 必须在交互式终端执行；非 TTY 会直接报错
   - 在终端打印二维码，并保存 `.local/qrcodes/douyin-http-<account>.png`

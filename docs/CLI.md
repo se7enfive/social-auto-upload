@@ -125,7 +125,7 @@ sau douyin upload-video --account <account_name> --file videos/demo.mp4 --title 
 sau douyin upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --tags 图文,测试
 ```
 
-抖音登录、检查和发布默认使用可见的本机 Chrome；`--headless` 会在参数解析阶段被拒绝，`--headed` 仅为兼容旧脚本保留。首次登录需要用户在打开的 Chrome 窗口中扫码或完成验证。
+抖音登录、检查和发布默认使用可见的本机 Chrome；`--headless` 会在参数解析阶段被拒绝，`--headed` 仅为兼容旧脚本保留。首次登录需要用户在打开的 Chrome 窗口中扫码或完成验证。安装 HTTP 运行时后，`login` / `check` 的 `auto` 会优先 HTTP（登录需要交互式终端和 HTTP 凭据）；需要强制浏览器时传 `--engine browser`。
 
 ### 抖音 HTTP 引擎（可选）
 
